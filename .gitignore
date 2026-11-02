@@ -1,0 +1,8 @@
+/build/
+/out/
+/assets/extracted/
+/assets/original/
+/assets/overrides/
+*.user
+*.suo
+/build-game/
