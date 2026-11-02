@@ -12,6 +12,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <system_error>
@@ -645,21 +646,27 @@ int main(int argc, char** argv)
     std::vector<s_part_group> part_groups;
 
     // Stage scene (.stg places meshes from the sibling .mdl; .hit is collision)
-    sdbz::s_stage loaded_stage;
+    std::vector<sdbz::s_stage> loaded_stages;
+    std::size_t loaded_stage_index = 0;
     bool has_loaded_stage = false;
     bool is_stg = false;
-    sdbz::s_model stage_model;
-    bool has_stage_model = false;
-    sdbz::s_hit stage_hit;
-    bool has_stage_hit = false;
-    std::vector<mat4> stage_world;                  // world transform per STG node
-    std::vector<char> stage_group;                  // 0 = STAGE, 1 = EFFECT, 2 = template roots
-    std::unordered_map<std::string, std::vector<std::size_t>> stage_meshes_by_name;
-    std::unordered_map<std::string, std::size_t> stage_hit_by_name;
-    std::vector<GLuint> stage_mesh_lists;           // compiled lazily once GL + textures exist
+    std::vector<sdbz::s_model> stage_models;
+    std::vector<bool> stage_models_loaded;
+    std::vector<sdbz::s_hit> stage_hits;
+    std::vector<bool> stage_hits_loaded;
+    std::vector<std::vector<GLuint>> stage_textures;
+    std::vector<bool> stage_textures_loaded;
+    std::vector<std::filesystem::path> stage_pix_paths;
+    std::vector<std::vector<mat4>> stage_worlds;
+    std::vector<std::vector<char>> stage_groups;
+    std::vector<std::unordered_map<std::string, std::vector<std::size_t>>> stage_meshes_by_names;
+    std::vector<std::unordered_map<std::string, std::size_t>> stage_hit_by_names;
+    std::vector<std::vector<GLuint>> stage_mesh_lists;           // compiled lazily once GL + textures exist
     bool show_effect = false;
     bool show_templates = false;
     bool show_collision = false;
+    bool has_stage_model = false;
+    bool has_stage_hit = false;
 
     // FFON font
     s_ffon_font font;
@@ -790,86 +797,126 @@ int main(int argc, char** argv)
             is_stg = true;
             try
             {
-                loaded_stage = sdbz::parse_stg(sdbz::read_file(input_path));
-                has_loaded_stage = true;
-                std::cout << "Loaded stage: " << loaded_stage.m_nodes.size() << " nodes, "
-                    << loaded_stage.m_names.size() << " names\n";
+                // Load ALL .stg files in the same folder (e.g. s03a.stg, s03b.stg)
+                std::vector<fs::path> stage_files = list_files(directory_of(input_path), ".stg");
+                std::sort(stage_files.begin(), stage_files.end());
+                for (const auto& stg_path : stage_files)
+                {
+                    try
+                    {
+                        sdbz::s_stage stg = sdbz::parse_stg(sdbz::read_file(stg_path));
+                        loaded_stages.push_back(std::move(stg));
+                        stage_models.emplace_back();
+                        stage_models_loaded.push_back(false);
+                        stage_hits.emplace_back();
+                        stage_hits_loaded.push_back(false);
+                        stage_textures.emplace_back();
+                        stage_textures_loaded.push_back(false);
+                        stage_pix_paths.emplace_back();
+                        stage_worlds.emplace_back();
+                        stage_groups.emplace_back();
+                        stage_meshes_by_names.emplace_back();
+                        stage_hit_by_names.emplace_back();
+                        stage_mesh_lists.emplace_back();
+                        std::cout << "Loaded stage: " << stg_path.filename().string() << " (" << loaded_stages.back().m_nodes.size() << " nodes)\n";
+                    }
+                    catch (const std::exception& exception)
+                    {
+                        std::cerr << "Stage load failed for " << stg_path.filename().string() << ": " << exception.what() << '\n';
+                    }
+                }
+                if (!loaded_stages.empty())
+                {
+                    has_loaded_stage = true;
+                    loaded_stage_index = 0;
+                    // Load companions for each stage
+                    for (std::size_t si = 0; si < loaded_stages.size(); ++si)
+                    {
+                        const auto& stg_path = stage_files[si];
+                        const auto sibling = [&](const char* extension) -> fs::path
+                        {
+                            const std::string stem = lower_copy(stg_path.stem().string());
+                            for (const auto& candidate : list_files(directory_of(stg_path), extension))
+                            {
+                                if (lower_copy(candidate.stem().string()) == stem) return candidate;
+                            }
+                            return {};
+                        };
+                        // Stage model (.mdl)
+                        const fs::path model_file = sibling(".mdl");
+                        if (!model_file.empty())
+                        {
+                            try
+                            {
+                                stage_models[si] = sdbz::parse_fmdl(sdbz::read_file(model_file), model_file.stem().string());
+                                stage_models_loaded[si] = true;
+                                has_stage_model = true;
+                                std::cout << "Stage model " << model_file.filename().string() << ": "
+                                    << stage_models[si].m_meshes.size() << " meshes\n";
+                                for (std::size_t mi = 0; mi < stage_models[si].m_meshes.size(); ++mi)
+                                {
+                                    stage_meshes_by_names[si][stage_models[si].m_meshes[mi].m_name].push_back(mi);
+                                }
+                            }
+                            catch (const std::exception& exception)
+                            {
+                                std::cerr << "Stage model unavailable: " << exception.what() << '\n';
+                            }
+                        }
+                        else
+                        {
+                            std::cerr << "No " << stg_path.stem().string() << ".mdl next to the stage; showing the node hierarchy only\n";
+                        }
+                        // Collision (.hit)
+                        const fs::path hit_file = sibling(".hit");
+                        if (!hit_file.empty())
+                        {
+                            try
+                            {
+                                stage_hits[si] = sdbz::parse_hit(sdbz::read_file(hit_file));
+                                stage_hits_loaded[si] = true;
+                                has_stage_hit = true;
+                                for (std::size_t oi = 0; oi < stage_hits[si].m_objects.size(); ++oi)
+                                {
+                                    stage_hit_by_names[si][stage_hits[si].m_objects[oi].m_name] = oi;
+                                }
+                                std::cout << "Stage collision " << hit_file.filename().string() << ": "
+                                    << stage_hits[si].m_objects.size() << " objects\n";
+                            }
+                            catch (const std::exception& exception)
+                            {
+                                std::cerr << "Stage collision unavailable: " << exception.what() << '\n';
+                            }
+                        }
+                        // Load stage textures (.pix) - deferred to after GL context creation
+                        const fs::path pix_file = sibling(".pix");
+                        if (!pix_file.empty())
+                        {
+                            stage_pix_paths[si] = pix_file;
+                        }
+                        // Compute world transforms
+                        const auto& nodes = loaded_stages[si].m_nodes;
+                        stage_worlds[si].resize(nodes.size());
+                        stage_groups[si].assign(nodes.size(), 2);
+                        for (std::size_t ni = 0; ni < nodes.size(); ++ni)
+                        {
+                            const auto& node = nodes[ni];
+                            const mat4 local = trs_matrix(node.m_translation, node.m_rotation_radians, node.m_scale);
+                            stage_worlds[si][ni] = (node.m_parent >= 0 && static_cast<std::size_t>(node.m_parent) < ni)
+                                ? mat4_mul(stage_worlds[si][static_cast<std::size_t>(node.m_parent)], local)
+                                : local;
+                            std::size_t root = ni;
+                            while (nodes[root].m_parent >= 0) root = static_cast<std::size_t>(nodes[root].m_parent);
+                            stage_groups[si][ni] = root == loaded_stages[si].m_stage_root ? 0 : (root == loaded_stages[si].m_effect_root ? 1 : 2);
+                        }
+                    }
+                }
             }
             catch (const std::exception& exception)
             {
                 std::cerr << "Stage load unavailable: " << exception.what() << '\n';
                 return 2;
             }
-
-            // Companions with the same name: meshes in .mdl, collision in .hit (textures: below).
-            const auto sibling = [&](const char* extension) -> fs::path
-            {
-                const std::string stem = lower_copy(input_path.stem().string());
-                for (const auto& candidate : list_files(directory_of(input_path), extension))
-                {
-                    if (lower_copy(candidate.stem().string()) == stem) return candidate;
-                }
-                return {};
-            };
-            const fs::path model_file = sibling(".mdl");
-            if (!model_file.empty())
-            {
-                try
-                {
-                    stage_model = sdbz::parse_fmdl(sdbz::read_file(model_file), model_file.stem().string());
-                    has_stage_model = true;
-                    std::cout << "Stage model " << model_file.filename().string() << ": "
-                        << stage_model.m_meshes.size() << " meshes\n";
-                    for (std::size_t mi = 0; mi < stage_model.m_meshes.size(); ++mi)
-                    {
-                        stage_meshes_by_name[stage_model.m_meshes[mi].m_name].push_back(mi);
-                    }
-                }
-                catch (const std::exception& exception)
-                {
-                    std::cerr << "Stage model unavailable: " << exception.what() << '\n';
-                }
-            }
-            else
-            {
-                std::cerr << "No " << input_path.stem().string() << ".mdl next to the stage; showing the node hierarchy only\n";
-            }
-            const fs::path hit_file = sibling(".hit");
-            if (!hit_file.empty())
-            {
-                try
-                {
-                    stage_hit = sdbz::parse_hit(sdbz::read_file(hit_file));
-                    has_stage_hit = true;
-                    for (std::size_t oi = 0; oi < stage_hit.m_objects.size(); ++oi)
-                    {
-                        stage_hit_by_name[stage_hit.m_objects[oi].m_name] = oi;
-                    }
-                    std::cout << "Stage collision " << hit_file.filename().string() << ": "
-                        << stage_hit.m_objects.size() << " objects\n";
-                }
-                catch (const std::exception& exception)
-                {
-                    std::cerr << "Stage collision unavailable: " << exception.what() << '\n';
-                }
-            }
-
-            // World transforms (parents always precede their children) and which root owns each node.
-            const auto& nodes = loaded_stage.m_nodes;
-            stage_world.resize(nodes.size());
-            stage_group.assign(nodes.size(), 2);
-            for (std::size_t ni = 0; ni < nodes.size(); ++ni)
-            {
-                const auto& node = nodes[ni];
-                const mat4 local = trs_matrix(node.m_translation, node.m_rotation_radians, node.m_scale);
-                stage_world[ni] = (node.m_parent >= 0 && static_cast<std::size_t>(node.m_parent) < ni)
-                    ? mat4_mul(stage_world[static_cast<std::size_t>(node.m_parent)], local)
-                    : local;
-                std::size_t root = ni;
-                while (nodes[root].m_parent >= 0) root = static_cast<std::size_t>(nodes[root].m_parent);
-                stage_group[ni] = root == loaded_stage.m_stage_root ? 0 : (root == loaded_stage.m_effect_root ? 1 : 2);
-            }
-        }
     }
 
     // Auto-detect companion files for a model.
@@ -993,6 +1040,26 @@ int main(int argc, char** argv)
     std::cout << "SDL init done\n";
 
     SDL_Gamepad* gamepad = SDL_OpenGamepad(0);
+
+    // Load stage textures AFTER OpenGL context is created
+    for (std::size_t si = 0; si < stage_pix_paths.size(); ++si)
+    {
+        if (!stage_pix_paths[si].empty())
+        {
+            try
+            {
+                const auto file_data = sdbz::read_file(stage_pix_paths[si]);
+                stage_textures[si] = load_fpix_textures(file_data);
+                stage_textures_loaded[si] = !stage_textures[si].empty();
+                std::cout << "Stage textures " << stage_pix_paths[si].filename().string() << ": "
+                    << stage_textures[si].size() << " textures\n";
+            }
+            catch (const std::exception& exception)
+            {
+                std::cerr << "Stage textures unavailable: " << exception.what() << '\n';
+            }
+        }
+    }
     if (!gamepad)
     {
         std::cerr << "No gamepad available (keyboard only).\n";
@@ -1070,6 +1137,16 @@ int main(int argc, char** argv)
                     if (event.key.key == SDLK_E) show_effect = !show_effect;
                     else if (event.key.key == SDLK_C) show_collision = !show_collision;
                     else if (event.key.key == SDLK_T) show_templates = !show_templates;
+                    else if (event.key.key == SDLK_PAGEUP)
+                    {
+                        loaded_stage_index = (loaded_stage_index + loaded_stages.size() - 1) % loaded_stages.size();
+                        std::cout << "Stage: " << loaded_stages[loaded_stage_index].m_names[0] << '\n';
+                    }
+                    else if (event.key.key == SDLK_PAGEDOWN)
+                    {
+                        loaded_stage_index = (loaded_stage_index + 1) % loaded_stages.size();
+                        std::cout << "Stage: " << loaded_stages[loaded_stage_index].m_names[0] << '\n';
+                    }
                 }
                 // Camera zoom (multiplicative so it works at any model scale) and re-fit
                 if (event.key.key == SDLK_EQUALS || event.key.key == SDLK_KP_PLUS)
@@ -1662,16 +1739,16 @@ int main(int argc, char** argv)
         {
             const auto group_visible = [&](std::size_t ni)
             {
-                const char group = stage_group[ni];
+                const char group = stage_groups[loaded_stage_index][ni];
                 return group == 0 || (group == 1 && show_effect) || (group == 2 && show_templates);
             };
 
-            if (has_stage_model && stage_mesh_lists.empty())
+            if (has_stage_model && stage_mesh_lists[loaded_stage_index].empty())
             {
-                stage_mesh_lists.reserve(stage_model.m_meshes.size());
-                for (const auto& mesh : stage_model.m_meshes)
+                stage_mesh_lists[loaded_stage_index].reserve(stage_models[loaded_stage_index].m_meshes.size());
+                for (const auto& mesh : stage_models[loaded_stage_index].m_meshes)
                 {
-                    stage_mesh_lists.push_back(compile_static_mesh_list(stage_model, mesh, texture_names));
+                    stage_mesh_lists[loaded_stage_index].push_back(compile_static_mesh_list(stage_models[loaded_stage_index], mesh, stage_textures[loaded_stage_index]));
                 }
             }
 
@@ -1690,26 +1767,25 @@ int main(int argc, char** argv)
                     }
                     any = true;
                 };
-                for (std::size_t ni = 0; ni < loaded_stage.m_nodes.size(); ++ni)
+                for (std::size_t ni = 0; ni < loaded_stages[loaded_stage_index].m_nodes.size(); ++ni)
                 {
-                    if (!group_visible(ni)) continue;
-                    const auto& node = loaded_stage.m_nodes[ni];
+                    const auto& node = loaded_stages[loaded_stage_index].m_nodes[ni];
                     if (has_stage_model)
                     {
                         if (node.m_kind != 2) continue;
-                        const auto it = stage_meshes_by_name.find(node.m_name);
-                        if (it == stage_meshes_by_name.end()) continue;
+                    const auto it = stage_meshes_by_names[loaded_stage_index].find(node.m_name);
+                    if (it == stage_meshes_by_names[loaded_stage_index].end()) continue;
                         for (const std::size_t mi : it->second)
                         {
-                            for (const auto& v : stage_model.m_meshes[mi].m_vertices)
+                            for (const auto& v : stage_models[loaded_stage_index].m_meshes[mi].m_vertices)
                             {
-                                extend(mat4_point(stage_world[ni], v.m_position));
+                                extend(mat4_point(stage_worlds[loaded_stage_index][ni], v.m_position));
                             }
                         }
                     }
                     else
                     {
-                        extend({ stage_world[ni][3], stage_world[ni][7], stage_world[ni][11] });
+                        extend({ stage_worlds[loaded_stage_index][ni][3], stage_worlds[loaded_stage_index][ni][7], stage_worlds[loaded_stage_index][ni][11] });
                     }
                 }
                 if (any)
@@ -1718,7 +1794,7 @@ int main(int argc, char** argv)
                     camera.m_target = { (lo[0] + hi[0]) * 0.5f, (lo[1] + hi[1]) * 0.5f, (lo[2] + hi[2]) * 0.5f };
                     const float extent = std::max({ hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2] });
                     camera.m_distance = std::max(extent * 0.6f, 0.1f);
-                    camera.m_pitch = 30.0f; // look down on the stage
+                    camera.m_pitch = -30.0f; // look down on the stage
                     std::cout << "Stage bbox: (" << lo[0] << "," << lo[1] << "," << lo[2] << ") to ("
                         << hi[0] << "," << hi[1] << "," << hi[2] << ") distance=" << camera.m_distance << '\n';
                 }
@@ -1736,15 +1812,15 @@ int main(int argc, char** argv)
                 GLfloat diffuse[] = { 0.8f, 0.8f, 0.8f, 1.0f };
                 glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
                 glColor3f(1.0f, 1.0f, 1.0f);
-                for (std::size_t ni = 0; ni < loaded_stage.m_nodes.size(); ++ni)
+                for (std::size_t ni = 0; ni < loaded_stages[loaded_stage_index].m_nodes.size(); ++ni)
                 {
-                    const auto& node = loaded_stage.m_nodes[ni];
+                    const auto& node = loaded_stages[loaded_stage_index].m_nodes[ni];
                     if (node.m_kind != 2 || !group_visible(ni)) continue;
-                    const auto it = stage_meshes_by_name.find(node.m_name);
-                    if (it == stage_meshes_by_name.end()) continue;
+                    const auto it = stage_meshes_by_names[loaded_stage_index].find(node.m_name);
+                    if (it == stage_meshes_by_names[loaded_stage_index].end()) continue;
                     glPushMatrix();
-                    gl_mult_matrix(stage_world[ni]);
-                    for (const std::size_t mi : it->second) glCallList(stage_mesh_lists[mi]);
+                    gl_mult_matrix(stage_worlds[loaded_stage_index][ni]);
+                    for (const std::size_t mi : it->second) glCallList(stage_mesh_lists[loaded_stage_index][mi]);
                     glPopMatrix();
                 }
                 glDisable(GL_LIGHTING);
@@ -1756,12 +1832,12 @@ int main(int argc, char** argv)
                 glDisable(GL_TEXTURE_2D);
                 glColor3f(0.0f, 1.0f, 0.0f);
                 glBegin(GL_LINES);
-                for (std::size_t ni = 0; ni < loaded_stage.m_nodes.size(); ++ni)
+                for (std::size_t ni = 0; ni < loaded_stages[loaded_stage_index].m_nodes.size(); ++ni)
                 {
-                    const auto& node = loaded_stage.m_nodes[ni];
+                    const auto& node = loaded_stages[loaded_stage_index].m_nodes[ni];
                     if (node.m_parent < 0 || !group_visible(ni)) continue;
-                    const auto& p = stage_world[static_cast<std::size_t>(node.m_parent)];
-                    const auto& c = stage_world[ni];
+                    const auto& p = stage_worlds[loaded_stage_index][static_cast<std::size_t>(node.m_parent)];
+                    const auto& c = stage_worlds[loaded_stage_index][ni];
                     glVertex3f(p[3], p[7], p[11]);
                     glVertex3f(c[3], c[7], c[11]);
                 }
@@ -1773,31 +1849,31 @@ int main(int argc, char** argv)
                 glDisable(GL_LIGHTING);
                 glDisable(GL_TEXTURE_2D);
                 glColor3f(0.1f, 1.0f, 0.3f);
-                for (std::size_t ni = 0; ni < loaded_stage.m_nodes.size(); ++ni)
+                for (std::size_t ni = 0; ni < loaded_stages[loaded_stage_index].m_nodes.size(); ++ni)
                 {
-                    const auto& node = loaded_stage.m_nodes[ni];
+                    const auto& node = loaded_stages[loaded_stage_index].m_nodes[ni];
                     if (node.m_kind != 3 || !group_visible(ni)) continue;
                     glPushMatrix();
-                    gl_mult_matrix(stage_world[ni]);
+                    gl_mult_matrix(stage_worlds[loaded_stage_index][ni]);
                     glBegin(GL_LINES);
                     for (const auto& reference : node.m_references)
                     {
-                        const auto it = stage_hit_by_name.find(reference.m_name);
-                        if (it == stage_hit_by_name.end()) continue;
-                        const auto& object = stage_hit.m_objects[it->second];
+                        const auto it = stage_hit_by_names[loaded_stage_index].find(reference.m_name);
+                        if (it == stage_hit_by_names[loaded_stage_index].end()) continue;
+                        const auto& object = stage_hits[loaded_stage_index].m_objects[it->second];
                         for (std::uint32_t pi = 0; pi < object.m_polygon_count; ++pi)
                         {
                             const std::size_t polygon_index = static_cast<std::size_t>(object.m_first_polygon) + pi;
-                            if (polygon_index >= stage_hit.m_polygons.size()) break;
-                            const auto& polygon = stage_hit.m_polygons[polygon_index];
+                            if (polygon_index >= stage_hits[loaded_stage_index].m_polygons.size()) break;
+                            const auto& polygon = stage_hits[loaded_stage_index].m_polygons[polygon_index];
                             for (std::uint32_t vi = 0; vi < polygon.m_vertex_count; ++vi)
                             {
                                 const std::size_t a = static_cast<std::size_t>(polygon.m_first_vertex) + vi;
                                 const std::size_t b = static_cast<std::size_t>(polygon.m_first_vertex) +
                                     ((vi + 1) % polygon.m_vertex_count);
-                                if (a >= stage_hit.m_vertices.size() || b >= stage_hit.m_vertices.size()) continue;
-                                const auto& pa = stage_hit.m_vertices[a].m_position;
-                                const auto& pb = stage_hit.m_vertices[b].m_position;
+                                if (a >= stage_hits[loaded_stage_index].m_vertices.size() || b >= stage_hits[loaded_stage_index].m_vertices.size()) continue;
+                                const auto& pa = stage_hits[loaded_stage_index].m_vertices[a].m_position;
+                                const auto& pb = stage_hits[loaded_stage_index].m_vertices[b].m_position;
                                 glVertex3f(pa[0], pa[1], pa[2]);
                                 glVertex3f(pb[0], pb[1], pb[2]);
                             }
@@ -1887,6 +1963,20 @@ int main(int argc, char** argv)
                 draw_text("1-9 cycle parts | Shift reverse | 0 reset | F fit camera | right-drag pan", 10.0f, line_y + 6.0f,
                     0.7f, 160, 200, 255, font, glyph_textures);
             }
+            // Camera info in bottom right
+            {
+                char cam_buf[128];
+                std::snprintf(cam_buf, sizeof(cam_buf),
+                    "Cam: yaw=%.1f pitch=%.1f dist=%.1f target=(%.1f,%.1f,%.1f)",
+                    camera.m_yaw, camera.m_pitch, camera.m_distance,
+                    camera.m_target[0], camera.m_target[1], camera.m_target[2]);
+                std::string cam_str(cam_buf);
+                // Estimate text width (6 px per char at scale 0.8)
+                float text_width = static_cast<float>(cam_str.size()) * 6.0f * 0.8f;
+                float cam_x = 10.0f;
+                float cam_y = static_cast<float>(drawable_height) - 20.0f;
+                draw_text(cam_str, cam_x, cam_y, 0.8f, 200, 200, 200, font, glyph_textures);
+            }
             end_2d();
         }
 
@@ -1907,3 +1997,9 @@ int main(int argc, char** argv)
     SDL_Quit();
     return 0;
 }
+
+ 
+ } 
+ 
+ 
+
