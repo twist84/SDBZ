@@ -542,6 +542,10 @@ int main(int argc, char** argv)
     s_camera camera;
     bool debug_open = false;
     int debug_selected = 0;
+    bool vfs_open = false;
+    fs::path vfs_path = fs::current_path();
+    int vfs_selected = 0;
+    std::vector<std::pair<std::string, bool>> vfs_entries;
     s_draw_context ctx;
     ctx.window = window;
     ctx.camera = &camera;
@@ -609,7 +613,7 @@ int main(int argc, char** argv)
         ctx.debug_open = debug_open;
         ctx.debug_selected = debug_selected;
         ctx.debug_menu.clear();
-        if (debug_open)
+        if (debug_open && !vfs_open)
         {
             if (has_loaded_stage)
             {
@@ -627,6 +631,7 @@ int main(int argc, char** argv)
                 show_collision ? "on" : "off" });
             ctx.debug_menu.push_back({ "Show templates",
                 show_templates ? "on" : "off" });
+            ctx.debug_menu.push_back({ "File browser", "" });
             ctx.debug_menu.push_back({ "Fit camera", "" });
             ctx.debug_menu.push_back({ "Quit", "" });
             if (debug_selected < 0 ||
@@ -634,6 +639,44 @@ int main(int argc, char** argv)
             {
                 debug_selected = 0;
                 ctx.debug_selected = 0;
+            }
+        }
+
+        // Build VFS entries each frame when open.
+        ctx.vfs_open = vfs_open;
+        ctx.vfs_selected = vfs_selected;
+        ctx.vfs_path = vfs_path;
+        ctx.vfs_entries.clear();
+        if (vfs_open)
+        {
+            std::error_code ec;
+            // Parent entry (..) unless at root.
+            bool has_parent = vfs_path.has_parent_path() &&
+                vfs_path.parent_path() != vfs_path;
+            if (has_parent)
+            {
+                ctx.vfs_entries.push_back({ "..", true });
+            }
+            for (fs::directory_iterator it(vfs_path, fs::directory_options::skip_permission_denied, ec), end;
+                 !ec && it != end; it.increment(ec))
+            {
+                std::error_code entry_ec;
+                if (!it->exists(entry_ec)) continue;
+                bool is_dir = it->is_directory(entry_ec);
+                ctx.vfs_entries.push_back({ it->path().filename().string(), is_dir });
+            }
+            // Sort: directories first, then alphabetically.
+            std::sort(ctx.vfs_entries.begin(), ctx.vfs_entries.end(),
+                [](const auto& a, const auto& b)
+                {
+                    if (a.second != b.second) return a.second;
+                    return a.first < b.first;
+                });
+            if (vfs_selected < 0 ||
+                vfs_selected >= static_cast<int>(ctx.vfs_entries.size()))
+            {
+                vfs_selected = 0;
+                ctx.vfs_selected = 0;
             }
         }
 
@@ -649,10 +692,18 @@ int main(int argc, char** argv)
                 // F1 toggles the debug menu regardless of state.
                 if (event.key.key == SDLK_F1)
                 {
-                    debug_open = !debug_open;
+                    if (vfs_open)
+                    {
+                        vfs_open = false;
+                        vfs_selected = 0;
+                    }
+                    else
+                    {
+                        debug_open = !debug_open;
+                    }
                     break;
                 }
-                if (debug_open)
+                if (debug_open && !vfs_open)
                 {
                     // Debug menu navigation.
                     if (event.key.key == SDLK_UP)
@@ -672,55 +723,263 @@ int main(int argc, char** argv)
                         {
                             const bool increment =
                                 (event.key.key == SDLK_RIGHT);
-                            // Activate the selected row. Order must match the menu build
-                            // below: stage, motion, effect, collision, templates, fit, quit.
-                            std::size_t row = 0;
-                            if (has_loaded_stage)
+                            const std::string& label = ctx.debug_menu[debug_selected].label;
+                            if (label == "File browser")
                             {
-                                if (row == debug_selected)
-                                {
-                                    loaded_stage_index = increment
-                                        ? (loaded_stage_index + 1) % loaded_stages.size()
-                                        : (loaded_stage_index + loaded_stages.size() - 1) %
-                                            loaded_stages.size();
-                                    std::cout << "Stage: "
-                                        << loaded_stages[loaded_stage_index].m_names[0]
-                                        << '\n';
-                                }
-                                ++row;
+                                vfs_open = true;
+                                debug_open = false;
+                                vfs_path = fs::current_path();
+                                vfs_selected = 0;
                             }
-                            if (has_loaded_motion)
+                            else if (label == "Stage" && has_loaded_stage)
                             {
-                                if (row == debug_selected)
-                                {
-                                    motion_clip_index = increment
-                                        ? (motion_clip_index + 1) %
-                                            loaded_motion.m_motions.size()
-                                        : (motion_clip_index +
-                                            loaded_motion.m_motions.size() - 1) %
-                                            loaded_motion.m_motions.size();
-                                    animation_time = 0.0f;
-                                    std::cout << "Motion clip " << motion_clip_index << ": "
-                                        << loaded_motion.m_motions[motion_clip_index].m_name
-                                        << '\n';
-                                }
-                                ++row;
+                                loaded_stage_index = increment
+                                    ? (loaded_stage_index + 1) % loaded_stages.size()
+                                    : (loaded_stage_index + loaded_stages.size() - 1) %
+                                        loaded_stages.size();
+                                std::cout << "Stage: "
+                                    << loaded_stages[loaded_stage_index].m_names[0]
+                                    << '\n';
                             }
-                            if (row == debug_selected) show_effect = !show_effect;
-                            ++row;
-                            if (row == debug_selected) show_collision = !show_collision;
-                            ++row;
-                            if (row == debug_selected) show_templates = !show_templates;
-                            ++row;
-                            if (row == debug_selected)
+                            else if (label == "Motion" && has_loaded_motion)
+                            {
+                                motion_clip_index = increment
+                                    ? (motion_clip_index + 1) %
+                                        loaded_motion.m_motions.size()
+                                    : (motion_clip_index +
+                                        loaded_motion.m_motions.size() - 1) %
+                                        loaded_motion.m_motions.size();
+                                animation_time = 0.0f;
+                                std::cout << "Motion clip " << motion_clip_index << ": "
+                                    << loaded_motion.m_motions[motion_clip_index].m_name
+                                    << '\n';
+                            }
+                            else if (label == "Show effect")
+                            {
+                                show_effect = !show_effect;
+                            }
+                            else if (label == "Show collision")
+                            {
+                                show_collision = !show_collision;
+                            }
+                            else if (label == "Show templates")
+                            {
+                                show_templates = !show_templates;
+                            }
+                            else if (label == "Fit camera")
                             {
                                 camera.m_framed = false;
                                 camera.m_yaw = 0.0f;
                                 camera.m_pitch = 0.0f;
                             }
-                            ++row;
-                            if (row == debug_selected) running = false;
+                            else if (label == "Quit")
+                            {
+                                running = false;
+                            }
                         }
+                    }
+                    break;
+                }
+                if (vfs_open)
+                {
+                    // Virtual file system navigation.
+                    const int count = static_cast<int>(ctx.vfs_entries.size());
+                    if (count == 0) break;
+                    if (event.key.key == SDLK_UP)
+                    {
+                        vfs_selected = (vfs_selected + count - 1) % count;
+                    }
+                    else if (event.key.key == SDLK_DOWN)
+                    {
+                        vfs_selected = (vfs_selected + 1) % count;
+                    }
+                    else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE ||
+                        event.key.key == SDLK_RIGHT)
+                    {
+                        const auto& entry = ctx.vfs_entries[vfs_selected];
+                        if (entry.second)
+                        {
+                            // Enter directory.
+                            if (entry.first == "..")
+                            {
+                                vfs_path = vfs_path.parent_path();
+                            }
+                            else
+                            {
+                                vfs_path /= entry.first;
+                            }
+                            vfs_selected = 0;
+                        }
+                        else
+                        {
+                            // Load file based on extension.
+                            fs::path file_path = vfs_path / entry.first;
+                            const std::string ext = file_path.extension().string();
+                            if (ext == ".mdl" || ext == ".MDL")
+                            {
+                                try
+                                {
+                                    loaded_model = sdbz::parse_fmdl(
+                                        sdbz::read_file(file_path), file_path.stem().string());
+                                    has_loaded_model = true;
+                                    mesh_visible.assign(loaded_model.m_meshes.size(), false);
+                                    part_groups.clear();
+                                    for (std::size_t mi = 0;
+                                        mi < loaded_model.m_meshes.size(); ++mi)
+                                    {
+                                        const auto& mesh_name =
+                                            loaded_model.m_meshes[mi].m_name;
+                                        const std::string label =
+                                            part_base_name(mesh_name);
+                                        auto it = std::find_if(part_groups.begin(),
+                                            part_groups.end(),
+                                            [&](const s_part_group& g)
+                                            { return g.m_label == label; });
+                                        if (it == part_groups.end())
+                                        {
+                                            part_groups.push_back({ label, {}, 0 });
+                                            it = part_groups.end() - 1;
+                                        }
+                                        it->m_meshes.push_back(mi);
+                                    }
+                                    apply_part_visibility(part_groups, mesh_visible);
+                                    std::cout << "Loaded model: " << loaded_model.m_name
+                                        << '\n';
+                                }
+                                catch (const std::exception& exception)
+                                {
+                                    std::cerr << "Model load failed: "
+                                        << exception.what() << '\n';
+                                }
+                            }
+                            else if (ext == ".pix" || ext == ".PIX")
+                            {
+                                try
+                                {
+                                    texture_names = load_fpix_textures(file_path);
+                                    has_textures = !texture_names.empty();
+                                    std::cout << "Loaded textures: " << texture_names.size()
+                                        << '\n';
+                                }
+                                catch (const std::exception& exception)
+                                {
+                                    std::cerr << "Texture load failed: "
+                                        << exception.what() << '\n';
+                                }
+                            }
+                            else if (ext == ".fon" || ext == ".FON")
+                            {
+                                try
+                                {
+                                    has_font = load_ffon(file_path, font);
+                                    if (has_font)
+                                    {
+                                        upload_glyph_textures(font, glyph_textures);
+                                        std::cout << "Loaded font: " << glyph_textures.size()
+                                            << " glyphs\n";
+                                    }
+                                }
+                                catch (const std::exception& exception)
+                                {
+                                    std::cerr << "Font load failed: "
+                                        << exception.what() << '\n';
+                                }
+                            }
+                            else if (ext == ".pmt" || ext == ".mot")
+                            {
+                                try
+                                {
+                                    auto package = sdbz::parse_rfsm(
+                                        sdbz::read_file(file_path));
+                                    loaded_motion = std::move(package);
+                                    has_loaded_motion = true;
+                                    motion_clip_index = 0;
+                                    animation_time = 0.0f;
+                                    std::cout << "Loaded motions: "
+                                        << loaded_motion.m_motions.size() << '\n';
+                                }
+                                catch (const std::exception& exception)
+                                {
+                                    std::cerr << "Motion load failed: "
+                                        << exception.what() << '\n';
+                                }
+                            }
+                            else if (ext == ".stg" || ext == ".STG")
+                            {
+                                try
+                                {
+                                    loaded_stages.clear();
+                                    stage_models.clear();
+                                    stage_models_loaded.clear();
+                                    stage_hits.clear();
+                                    stage_hits_loaded.clear();
+                                    stage_textures.clear();
+                                    stage_textures_loaded.clear();
+                                    stage_pix_paths.clear();
+                                    stage_worlds.clear();
+                                    stage_groups.clear();
+                                    stage_meshes_by_names.clear();
+                                    stage_hit_by_names.clear();
+                                    stage_mesh_lists.clear();
+
+                                    sdbz::s_stage stg = sdbz::parse_stg(
+                                        sdbz::read_file(file_path));
+                                    loaded_stages.push_back(std::move(stg));
+                                    has_loaded_stage = true;
+                                    loaded_stage_index = 0;
+                                    stage_models.emplace_back();
+                                    stage_models_loaded.push_back(false);
+                                    stage_hits.emplace_back();
+                                    stage_hits_loaded.push_back(false);
+                                    stage_textures.emplace_back();
+                                    stage_textures_loaded.push_back(false);
+                                    stage_pix_paths.emplace_back();
+                                    stage_worlds.emplace_back();
+                                    stage_groups.emplace_back();
+                                    stage_meshes_by_names.emplace_back();
+                                    stage_hit_by_names.emplace_back();
+                                    stage_mesh_lists.emplace_back();
+                                    std::cout << "Loaded stage: "
+                                        << file_path.filename().string() << '\n';
+                                }
+                                catch (const std::exception& exception)
+                                {
+                                    std::cerr << "Stage load failed: "
+                                        << exception.what() << '\n';
+                                }
+                            }
+                            else if (ext == ".hit" || ext == ".HIT")
+                            {
+                                try
+                                {
+                                    loaded_hit = sdbz::parse_hit(
+                                        sdbz::read_file(file_path));
+                                    has_loaded_hit = true;
+                                    std::cout << "Loaded hit: " << loaded_hit.m_objects.size()
+                                        << " objects\n";
+                                }
+                                catch (const std::exception& exception)
+                                {
+                                    std::cerr << "Hit load failed: "
+                                        << exception.what() << '\n';
+                                }
+                            }
+                        }
+                    }
+                    else if (event.key.key == SDLK_BACKSPACE || event.key.key == SDLK_LEFT)
+                    {
+                        // Go up one directory.
+                        if (vfs_path.has_parent_path() &&
+                            vfs_path.parent_path() != vfs_path)
+                        {
+                            vfs_path = vfs_path.parent_path();
+                            vfs_selected = 0;
+                        }
+                    }
+                    else if (event.key.key == SDLK_ESCAPE)
+                    {
+                        vfs_open = false;
+                        vfs_selected = 0;
                     }
                     break;
                 }
@@ -823,15 +1082,15 @@ int main(int argc, char** argv)
                 if (event.button.button == SDL_BUTTON_LEFT)
                 {
                     left_button_down = true;
-                    last_mouse_x = event.button.x;
-                    last_mouse_y = event.button.y;
+                    last_mouse_x = static_cast<int>(event.button.x);
+                    last_mouse_y = static_cast<int>(event.button.y);
                 }
                 else if (event.button.button == SDL_BUTTON_RIGHT ||
                     event.button.button == SDL_BUTTON_MIDDLE)
                 {
                     pan_button_down = true;
-                    last_mouse_x = event.button.x;
-                    last_mouse_y = event.button.y;
+                    last_mouse_x = static_cast<int>(event.button.x);
+                    last_mouse_y = static_cast<int>(event.button.y);
                 }
                 break;
             case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -848,15 +1107,15 @@ int main(int argc, char** argv)
             case SDL_EVENT_MOUSE_MOTION:
                 if (left_button_down)
                 {
-                    const int dx = event.motion.x - last_mouse_x;
-                    const int dy = event.motion.y - last_mouse_y;
+                    const int dx = static_cast<int>(event.motion.x) - last_mouse_x;
+                    const int dy = static_cast<int>(event.motion.y) - last_mouse_y;
                     // Flip a sign to invert that axis of the mouse drag.
                     constexpr float k_drag_x = -0.5f;
                     constexpr float k_drag_y = -0.5f;
                     camera.m_yaw += dx * k_drag_x;
                     camera.m_pitch = std::clamp(camera.m_pitch + dy * k_drag_y, -85.0f, 85.0f);
-                    last_mouse_x = event.motion.x;
-                    last_mouse_y = event.motion.y;
+                    last_mouse_x = static_cast<int>(event.motion.x);
+                    last_mouse_y = static_cast<int>(event.motion.y);
                 }
                 else if (pan_button_down)
                 {

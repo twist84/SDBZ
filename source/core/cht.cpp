@@ -15,7 +15,7 @@ namespace sdbz
     {
         void align_cursor(std::size_t& cursor)
         {
-            cursor += (-cursor) % 16;
+            cursor = (cursor + 15) & ~std::size_t{ 15 };
         }
     }
 

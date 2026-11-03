@@ -53,6 +53,12 @@ struct s_draw_context
     int debug_selected = 0;
     std::vector<s_menu_item> debug_menu;
 
+    // Virtual file system browser (entered from the debug menu).
+    bool vfs_open = false;
+    fs::path vfs_path;
+    int vfs_selected = 0;
+    std::vector<std::pair<std::string, bool>> vfs_entries; // name, is_dir
+
     // Model viewer.
     const sdbz::s_model* model = nullptr;
     bool has_model = false;

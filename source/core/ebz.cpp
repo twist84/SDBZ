@@ -72,9 +72,9 @@ namespace sdbz
 
             s_ebz_entry entry;
             entry.m_index = i;
-            for (int f = 0; f < 28; ++f)
+            for (int fi = 0; fi < 28; ++fi)
             {
-                entry.m_fields[f] = read_u32_le(data, eoff + f * 4).value();
+                entry.m_fields[fi] = read_u32_le(data, eoff + fi * 4).value();
             }
             result.m_entries.push_back(entry);
         }

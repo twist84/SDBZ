@@ -952,6 +952,50 @@ void render_frame(s_draw_context& ctx)
         end_2d();
     }
 
+    // Virtual file system browser overlay.
+    if (ctx.vfs_open && ctx.has_font && ctx.font && ctx.glyph_textures &&
+        !ctx.vfs_entries.empty())
+    {
+        begin_2d(ctx.drawable_width, ctx.drawable_height);
+        draw_text("VIRTUAL FILE SYSTEM  (Backspace: up  |  Esc: close)", 10.0f, 60.0f,
+            1.0f, 255, 255, 0, *ctx.font, *ctx.glyph_textures);
+        std::string path_str = ctx.vfs_path.string();
+        if (path_str.size() > 95)
+        {
+            path_str = "..." + path_str.substr(path_str.size() - 92);
+        }
+        draw_text("Path: " + path_str, 10.0f, 84.0f, 0.7f, 200, 200, 200,
+            *ctx.font, *ctx.glyph_textures);
+        float y = 106.0f;
+        int max_entries = (ctx.drawable_height - 130) / 18;
+        if (max_entries < 1) max_entries = 1;
+        // Scroll so selection stays visible.
+        int start = 0;
+        if (ctx.vfs_selected >= start + max_entries)
+            start = ctx.vfs_selected - max_entries + 1;
+        if (ctx.vfs_selected < start)
+            start = ctx.vfs_selected;
+        if (start < 0) start = 0;
+        if (start + max_entries > static_cast<int>(ctx.vfs_entries.size()))
+            start = static_cast<int>(ctx.vfs_entries.size()) - max_entries;
+        if (start < 0) start = 0;
+        for (int i = start; i < start + max_entries && i < static_cast<int>(ctx.vfs_entries.size()); ++i)
+        {
+            const bool selected = (i == ctx.vfs_selected);
+            const std::uint8_t r = selected ? 255 : 200;
+            const std::uint8_t g = selected ? 255 : 200;
+            const std::uint8_t b = selected ? 100 : 200;
+            std::string line = (selected ? "> " : "  ");
+            line += ctx.vfs_entries[i].second ? "[dir] " : "[file]";
+            line += ctx.vfs_entries[i].first;
+            draw_text(line, 10.0f, y, 0.7f, r, g, b, *ctx.font, *ctx.glyph_textures);
+            y += 18.0f;
+        }
+        draw_text("Enter: enter dir / load file", 10.0f, static_cast<float>(ctx.drawable_height) - 24.0f,
+            0.6f, 160, 160, 160, *ctx.font, *ctx.glyph_textures);
+        end_2d();
+    }
+
     SDL_GL_SwapWindow(window);
     SDL_Delay(1);
 }

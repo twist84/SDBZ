@@ -7,7 +7,7 @@ project(SuperDragonBallZRebuild
 )
 
 option(SDBZ_BUILD_GAME "Build the SDL3 game runtime when SDL3 is available" ON)
-option(SDBZ_FETCH_SDL3 "Fetch SDL3 when no system SDL3 package is available" OFF)
+option(SDBZ_FETCH_SDL3 "Fetch SDL3 when no system SDL3 package is available" ON)
 option(SDBZ_BUILD_TESTS "Build the native format tests" ON)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -41,9 +41,9 @@ target_include_directories(sdbz_core PUBLIC
 )
 
 if(MSVC)
-    target_compile_options(sdbz_core PRIVATE /W4 /permissive- /EHsc)
+    target_compile_options(sdbz_core PRIVATE /W4 /permissive- /EHsc /WX)
 else()
-    target_compile_options(sdbz_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
+    target_compile_options(sdbz_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Werror)
 endif()
 
 add_executable(sdbz_tool
@@ -72,6 +72,8 @@ if(SDBZ_BUILD_GAME)
         )
         set(SDL_SHARED ON CACHE BOOL "Build SDL3 shared library" FORCE)
         set(SDL_STATIC OFF CACHE BOOL "Build SDL3 static library" FORCE)
+        set(SDL_VIDEO ON CACHE BOOL "Enable the Video subsystem" FORCE)
+        set(SDL_DIRECTX ON CACHE BOOL "Use DirectX for Windows audio/video" FORCE)
         FetchContent_MakeAvailable(SDL3)
     else()
         find_package(SDL3 CONFIG QUIET)
@@ -88,9 +90,9 @@ if(SDBZ_BUILD_GAME)
             target_link_libraries(sdbz_game PRIVATE opengl32)
         endif()
         if(MSVC)
-            target_compile_options(sdbz_game PRIVATE /W4 /permissive- /EHsc)
+            target_compile_options(sdbz_game PRIVATE /W4 /permissive- /EHsc /WX)
         else()
-            target_compile_options(sdbz_game PRIVATE -Wall -Wextra -Wpedantic)
+            target_compile_options(sdbz_game PRIVATE -Wall -Wextra -Wpedantic -Werror)
         endif()
     else()
         message(WARNING
