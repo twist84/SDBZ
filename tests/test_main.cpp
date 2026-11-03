@@ -1,6 +1,12 @@
 #include "core/animation.hpp"
+#include "core/ase.hpp"
+#include "core/ams.hpp"
+#include "core/cht.hpp"
+#include "core/fon.hpp"
+#include "core/spt.hpp"
 #include "core/binary_reader.hpp"
 #include "core/container.hpp"
+#include "core/ebz.hpp"
 #include "core/elf.hpp"
 #include "core/info_archive.hpp"
 #include "core/model.hpp"
@@ -393,9 +399,7 @@ namespace
             std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(replacement.data()), replacement.size()));
 
         const auto archive = sdbz::s_archive::from_encoded_info(encoded_info, game_data.size());
-        std::cerr << "DBG: before rebuild" << std::endl;
         archive.rebuild(info_path, game_path, root / "replacements", output_path);
-        std::cerr << "DBG: after rebuild" << std::endl;
 
         const auto rebuilt_info = sdbz::read_file(output_path / "INFO.DAT");
         const auto rebuilt_archive = sdbz::s_archive::from_encoded_info(rebuilt_info,
@@ -705,6 +709,71 @@ int main()
     std::cout << "info_codec" << std::endl; test_info_codec();
     std::cout << "test_info_table();" << std::endl; test_info_table();
     std::cout << "archive" << std::endl; test_archive_rebuild();
+    // EBZ test
+    {
+        const auto data = sdbz::read_file("assets/extracted/eff/e00/e00003.ebz");
+        const auto ebz = sdbz::parse_ebz(data);
+        require(ebz.m_version == 1, "EBZ version");
+        require(ebz.m_count > 0, "EBZ has entries");
+        require(!ebz.m_refs.empty(), "EBZ has refs");
+        std::cout << "EBZ: version=" << ebz.m_version << " type=" << ebz.m_type
+            << " count=" << ebz.m_count << " refs=" << ebz.m_refs.size()
+            << " entries=" << ebz.m_entries.size() << '\n';
+    }
+    // ASE test
+    {
+        const auto data = sdbz::read_file("assets/extracted/ply/p01/p01.ase");
+        const auto ase = sdbz::parse_ase(data);
+        require(ase.m_version == 100, "ASE version");
+        require(!ase.m_samples.empty(), "ASE has samples");
+        std::cout << "ASE: version=" << ase.m_version
+            << " samples=" << ase.m_samples.size() << '\n';
+    }
+    // AMS test
+    {
+        const auto data = sdbz::read_file("assets/extracted/sqm/menu_lp.ams");
+        const auto ams = sdbz::parse_ams(data);
+        require(ams.m_version == 120, "AMS version");
+        require(!ams.m_left_samples.empty(), "AMS has left samples");
+        require(!ams.m_right_samples.empty(), "AMS has right samples");
+        std::cout << "AMS: version=" << ams.m_version
+            << " pitch=" << ams.m_pitch
+            << " units=" << ams.m_unit_count
+            << " samples=" << ams.m_left_samples.size() << '\n';
+    }
+    // FON test
+    {
+        const auto data = sdbz::read_file("assets/extracted/font/5-24-2.fon");
+        const auto fon = sdbz::parse_fon(data);
+        require(fon.m_glyph_count == 1154, "FON glyph count");
+        require(fon.m_char_map.size() == 3840, "FON char map");
+        std::cout << "FON: glyphs=" << fon.m_glyph_count
+            << " map=" << fon.m_char_map.size() << '\n';
+    }
+    // CHT test
+    {
+        try
+        {
+            const auto data = sdbz::read_file("assets/extracted/ply/p01/p01act.cht");
+            const auto cht = sdbz::parse_cht(data);
+            require(!cht.m_names.empty(), "CHT names");
+            require(!cht.m_actions.empty(), "CHT actions");
+            std::cout << "CHT: names=" << cht.m_names.size()
+                << " actions=" << cht.m_actions.size() << '\n';
+        }
+        catch (const std::exception& e)
+        {
+            std::cerr << "CHT exception: " << e.what() << '\n';
+            ++g_failures;
+        }
+    }
+    // SPT test
+    {
+        const auto data = sdbz::read_file("assets/extracted/spt/stage_test.spt");
+        const auto spt = sdbz::parse_spt(data);
+        require(!spt.m_programs.empty(), "SPT programs");
+        std::cout << "SPT: programs=" << spt.m_programs.size() << '\n';
+    }
     //ref
     //cont
     //anim

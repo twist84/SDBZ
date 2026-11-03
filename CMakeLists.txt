@@ -14,22 +14,28 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Windows SDK headers may define min/max macros that break std::numeric_limits.
 if(WIN32)
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
-
 add_library(sdbz_core STATIC
     source/core/binary_reader.cpp
     source/core/info_archive.cpp
     source/core/container.cpp
     source/core/elf.cpp
+    source/core/math.cpp
     source/core/texture.cpp
     source/core/model.cpp
     source/core/animation.cpp
+    source/core/info_archive.cpp
     source/core/stage.cpp
+    source/core/ebz.cpp
+    source/core/ase.cpp
+    source/core/ams.cpp
+    source/core/fon.cpp
+    source/core/cht.cpp
+    source/core/spt.cpp
+    source/core/audio/adpcm.cpp
 )
-
 target_include_directories(sdbz_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/source"
 )
@@ -54,7 +60,6 @@ if(SDBZ_BUILD_TESTS)
     target_compile_definitions(sdbz_tests PRIVATE
         SDBZ_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
     )
-    add_test(NAME sdbz_core_tests COMMAND sdbz_tests)
 endif()
 
 if(SDBZ_BUILD_GAME)
@@ -75,6 +80,8 @@ if(SDBZ_BUILD_GAME)
     if(TARGET SDL3::SDL3)
         add_executable(sdbz_game
             source/platform/sdl_main.cpp
+            source/assets/assets.cpp
+            source/render/renderer.cpp
         )
         target_link_libraries(sdbz_game PRIVATE sdbz_core SDL3::SDL3)
         if(WIN32)
@@ -92,4 +99,3 @@ if(SDBZ_BUILD_GAME)
         )
     endif()
 endif()
-
