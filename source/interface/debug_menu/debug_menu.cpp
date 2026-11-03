@@ -42,7 +42,7 @@ int debug_menu_build(s_debug_menu& menu,
     return static_cast<int>(menu.items.size());
 }
 
-bool debug_menu_input(s_debug_menu& menu, const SDL_Event& event,
+bool debug_menu_input(s_debug_menu& menu, const s_event& event,
     bool& running,
     bool& show_effect, bool& show_collision, bool& show_templates,
     bool& camera_framed, float& camera_yaw, float& camera_pitch,
@@ -60,20 +60,20 @@ bool debug_menu_input(s_debug_menu& menu, const SDL_Event& event,
     }
 
     // Quick-select: 0-9 then a-z.
-    const auto quick_select_index = [](SDL_Keycode key) -> int
+    const auto quick_select_index = [](e_key key) -> int
     {
-        if (key >= SDLK_0 && key <= SDLK_9)
+        if (key >= e_key::digit_0 && key <= e_key::digit_9)
         {
-            return static_cast<int>(key - SDLK_0);
+            return static_cast<int>(key) - static_cast<int>(e_key::digit_0);
         }
-        if (key >= SDLK_A && key <= SDLK_Z)
+        if (key >= e_key::a && key <= e_key::z)
         {
-            return 10 + static_cast<int>(key - SDLK_A);
+            return 10 + (static_cast<int>(key) - static_cast<int>(e_key::a));
         }
         return -1;
     };
 
-    const int qs = quick_select_index(event.key.key);
+    const int qs = quick_select_index(event.key);
     if (qs >= 0 && qs < static_cast<int>(menu.items.size()))
     {
         menu.selected = qs;
@@ -81,7 +81,7 @@ bool debug_menu_input(s_debug_menu& menu, const SDL_Event& event,
     }
 
     // Navigation.
-    if (event.key.key == SDLK_UP)
+    if (event.key == e_key::up)
     {
         const int count = static_cast<int>(menu.items.size());
         menu.selected = (menu.selected + count - 1) % count;
@@ -91,7 +91,7 @@ bool debug_menu_input(s_debug_menu& menu, const SDL_Event& event,
         }
         return true;
     }
-    if (event.key.key == SDLK_DOWN)
+    if (event.key == e_key::down)
     {
         const int count = static_cast<int>(menu.items.size());
         menu.selected = (menu.selected + 1) % count;
@@ -103,7 +103,7 @@ bool debug_menu_input(s_debug_menu& menu, const SDL_Event& event,
     }
 
     // Enter activates.
-    if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE)
+    if (event.key == e_key::enter || event.key == e_key::space)
     {
         if (menu.items.empty())
         {

@@ -26,7 +26,6 @@ add_library(sdbz_core STATIC
     source/core/texture.cpp
     source/core/model.cpp
     source/core/animation.cpp
-    source/core/info_archive.cpp
     source/core/stage.cpp
     source/core/ebz.cpp
     source/core/ase.cpp
@@ -82,9 +81,21 @@ if(SDBZ_BUILD_GAME)
     if(TARGET SDL3::SDL3)
         add_executable(sdbz_game
             source/platform/sdl_main.cpp
-            source/assets/assets.cpp
+            source/platform/window.cpp
+            source/platform/event.cpp
+            source/platform/audio.cpp
+            source/assets/ffon.cpp
+            source/assets/fpix.cpp
+            source/assets/discovery.cpp
+            source/interface/part_groups.cpp
             source/interface/debug_menu/debug_menu.cpp
+            source/rasterizer/math_helpers.cpp
+            source/rasterizer/gl_helpers.cpp
+            source/render/model_renderer.cpp
+            source/render/stage_renderer.cpp
             source/render/renderer.cpp
+            source/interface/hud.cpp
+            source/interface/vfs_overlay.cpp
         )
         target_link_libraries(sdbz_game PRIVATE sdbz_core SDL3::SDL3)
         if(WIN32)

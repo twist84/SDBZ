@@ -137,7 +137,7 @@ namespace
         const auto data = sdbz::read_file(input_path);
         const auto image = sdbz::decode_first_fpix_texture(data);
         sdbz::write_bmp_rgba(output_path, image);
-        std::cout << "Decoded " << image.m_width << 'x' << image.m_height << " texture to " << output_path.string() << '\n';
+        std::cout << "Decoded " << image.width << 'x' << image.height << " texture to " << output_path.string() << '\n';
         return 0;
     }
 

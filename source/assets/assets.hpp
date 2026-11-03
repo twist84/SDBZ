@@ -60,18 +60,5 @@ std::string character_prefix(const std::string& stem);
 // (p01a.mdl -> p01sel.pmt, p01act.pmt), or every .pmt in the folder if none match.
 [[nodiscard]] std::vector<fs::path> find_motions_for(const fs::path& model_path);
 
-// Mesh part groups: each number key cycles the variants of one body part.
-struct s_part_group
-{
-    std::string m_label;                // e.g. "Head", "Hair", "LHand"
-    std::vector<std::size_t> m_meshes;  // mesh indices, one per variant
-    std::size_t m_active = 0;           // index into m_meshes; == m_meshes.size() means hidden
-};
-
-// "MeshLHandA" -> "LHand", "ShapeHeadAB" -> "Head", "MeshHair" -> "Hair".
-std::string part_base_name(const std::string& name);
-
-void apply_part_visibility(const std::vector<s_part_group>& groups, std::vector<bool>& visible);
-
 // Look for a .fon near the model: its folder and a few parents, a few levels deep each.
 [[nodiscard]] fs::path find_font_near(const fs::path& start);

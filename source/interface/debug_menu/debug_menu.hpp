@@ -4,12 +4,12 @@
 #include <string>
 #include <vector>
 
-#include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 
 #include "assets/assets.hpp"
 #include "core/animation.hpp"
 #include "core/stage.hpp"
+#include "platform/event.hpp"
 
 namespace sdbz
 {
@@ -41,7 +41,7 @@ int debug_menu_build(s_debug_menu& menu,
     bool archive_loaded);
 
 // Handle debug menu input. Returns true if the event was consumed.
-bool debug_menu_input(s_debug_menu& menu, const SDL_Event& event,
+bool debug_menu_input(s_debug_menu& menu, const s_event& event,
     bool& running,
     bool& show_effect, bool& show_collision, bool& show_templates,
     bool& camera_framed, float& camera_yaw, float& camera_pitch,

@@ -9,8 +9,9 @@
 #include <utility>
 #include <vector>
 
-#include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
+
+#include "platform/window.hpp"
 
 #include "assets/assets.hpp"
 #include "core/animation.hpp"
@@ -21,6 +22,7 @@
 #include "core/texture.hpp"
 
 #include "interface/debug_menu/debug_menu.hpp"
+#include "interface/part_groups.hpp"
 
 namespace fs = std::filesystem;
 
@@ -37,7 +39,7 @@ struct s_camera
 // All state required to render a viewer frame. Pointers are non-owning.
 struct s_draw_context
 {
-    SDL_Window* window = nullptr;
+    c_window* window = nullptr;
     int drawable_width = 0;
     int drawable_height = 0;
 

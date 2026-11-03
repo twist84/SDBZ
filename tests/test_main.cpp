@@ -495,7 +495,7 @@ namespace
     {
         const auto data = make_textured_fpix();
         const auto image = sdbz::decode_first_fpix_texture(data);
-        require(image.m_width == 1 && image.m_height == 1, "TIM2 dimensions");
+        require(image.width == 1 && image.height == 1, "TIM2 dimensions");
         require(image.m_format == sdbz::e_texture_format::rgba32, "TIM2 RGBA32 format");
         require(image.m_rgba == std::vector<std::uint8_t>({ 255, 0, 0, 255 }), "TIM2 RGBA and alpha expansion");
     }

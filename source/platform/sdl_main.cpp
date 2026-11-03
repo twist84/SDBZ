@@ -23,9 +23,10 @@
 #include "core/stage.hpp"
 #include "core/texture.hpp"
 
-#include "audio/adpcm.hpp"
-#include "core/ase.hpp"
+#include "platform/event.hpp"
+#include "platform/window.hpp"
 
+#include "interface/part_groups.hpp"
 #include "render/renderer.hpp"
 
 namespace fs = std::filesystem;
@@ -147,8 +148,8 @@ int main(int argc, char** argv)
                 const auto file_data = sdbz::read_file(input_path);
                 loaded_image = sdbz::decode_first_fpix_texture(file_data);
                 has_loaded_image = true;
-                std::cout << "Loaded texture: " << loaded_image.m_width << "x"
-                    << loaded_image.m_height << '\n';
+                std::cout << "Loaded texture: " << loaded_image.width << "x"
+                    << loaded_image.height << '\n';
             }
             catch (const std::exception& exception)
             {
@@ -345,21 +346,75 @@ int main(int argc, char** argv)
                         const auto& nodes = loaded_stages[si].m_nodes;
                         stage_worlds[si].resize(nodes.size());
                         stage_groups[si].assign(nodes.size(), 2);
+                        std::vector<sdbz::mat4> locals(nodes.size());
                         for (std::size_t ni = 0; ni < nodes.size(); ++ni)
                         {
                             const auto& node = nodes[ni];
-                            const sdbz::mat4 local = sdbz::trs_matrix(
+                            locals[ni] = sdbz::trs_matrix(
                                 node.m_translation, node.m_rotation_radians, node.m_scale);
-                            stage_worlds[si][ni] = (node.m_parent >= 0 &&
-                                static_cast<std::size_t>(node.m_parent) < ni)
-                                ? sdbz::mat4_mul(stage_worlds[si][
-                                    static_cast<std::size_t>(node.m_parent)], local)
-                                : local;
+                        }
+                        std::vector<std::uint8_t> xform_state(nodes.size(), 0);
+                        for (std::size_t start = 0; start < nodes.size(); ++start)
+                        {
+                            if (xform_state[start] != 0) continue;
+                            std::vector<std::size_t> stack;
+                            stack.push_back(start);
+                            while (!stack.empty())
+                            {
+                                const std::size_t idx = stack.back();
+                                if (xform_state[idx] == 2)
+                                {
+                                    stack.pop_back();
+                                    continue;
+                                }
+                                if (xform_state[idx] == 1)
+                                {
+                                    const int parent = nodes[idx].m_parent;
+                                    if (parent >= 0 &&
+                                        static_cast<std::size_t>(parent) < nodes.size())
+                                    {
+                                        stage_worlds[si][idx] = sdbz::mat4_mul(
+                                            stage_worlds[si][static_cast<std::size_t>(parent)],
+                                            locals[idx]);
+                                    }
+                                    else
+                                    {
+                                        stage_worlds[si][idx] = locals[idx];
+                                    }
+                                    xform_state[idx] = 2;
+                                    stack.pop_back();
+                                    continue;
+                                }
+                                if (xform_state[idx] == 0)
+                                {
+                                    const int parent = nodes[idx].m_parent;
+                                    if (parent >= 0 &&
+                                        static_cast<std::size_t>(parent) < nodes.size())
+                                    {
+                                        if (xform_state[static_cast<std::size_t>(parent)] == 1)
+                                        {
+                                            stage_worlds[si][idx] = locals[idx];
+                                            xform_state[idx] = 2;
+                                            stack.pop_back();
+                                            continue;
+                                        }
+                                        if (xform_state[static_cast<std::size_t>(parent)] == 0)
+                                        {
+                                            stack.push_back(static_cast<std::size_t>(parent));
+                                        }
+                                    }
+                                    xform_state[idx] = 1;
+                                    continue;
+                                }
+                            }
+                        }
+                        for (std::size_t ni = 0; ni < nodes.size(); ++ni)
+                        {
                             std::size_t root = ni;
-                            while (nodes[root].m_parent >= 0)
+                            while (root < nodes.size() && nodes[root].m_parent >= 0)
                                 root = static_cast<std::size_t>(nodes[root].m_parent);
-                            stage_groups[si][ni] = root == loaded_stages[si].m_stage_root ? 0 :
-                                (root == loaded_stages[si].m_effect_root ? 1 : 2);
+                            stage_groups[si][ni] = (root == loaded_stages[si].m_stage_root) ? 0 :
+                                ((root == loaded_stages[si].m_effect_root) ? 1 : 2);
                         }
                     }
                 }
@@ -521,27 +576,15 @@ int main(int argc, char** argv)
     // ---- SDL / OpenGL / audio platform initialisation ----
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS | SDL_INIT_AUDIO);
 
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-
-    SDL_Window* window = SDL_CreateWindow("Super Dragon Ball Z - Native Rebuild (OpenGL)",
-        1120, 490, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-    if (!window)
+    c_window window;
+    if (!window.create("Super Dragon Ball Z - Native Rebuild (OpenGL)",
+            1120, 490))
     {
         std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << '\n';
         SDL_Quit();
         return 1;
     }
-
-    SDL_GLContext gl_context = SDL_GL_CreateContext(window);
-    if (!gl_context)
-    {
-        std::cerr << "SDL_GL_CreateContext failed: " << SDL_GetError() << '\n';
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return 1;
-    }
-    SDL_GL_MakeCurrent(window, gl_context);
+    window.make_gl_current();
     glEnable(GL_DEPTH_TEST);
 
     // Open audio device.
@@ -559,41 +602,6 @@ int main(int argc, char** argv)
     {
         std::cout << "Audio device opened: " << audio_spec.freq << " Hz, "
             << audio_spec.channels << " channels\n";
-    }
-
-    // Load ASE sound effects from extracted assets (kept available, not played).
-    std::vector<std::int16_t> attack_sound;
-    const fs::path assets_extracted = "assets/extracted";
-    if (fs::is_directory(assets_extracted))
-    {
-        for (const auto& entry : fs::recursive_directory_iterator(assets_extracted))
-        {
-            if (entry.is_regular_file() && entry.path().extension() == ".ase")
-            {
-                try
-                {
-                    const auto ase_data = sdbz::read_file(entry.path());
-                    const auto ase = sdbz::parse_ase(ase_data);
-                    for (const auto& sample : ase.m_samples)
-                    {
-                        if (!sample.m_payload.empty())
-                        {
-                            sdbz::s_adpcm_decoder decoder;
-                            const auto decoded = decoder.decode(sample.m_payload);
-                            attack_sound.insert(attack_sound.end(),
-                                decoded.begin(), decoded.end());
-                        }
-                    }
-                    std::cout << "Loaded ASE: " << entry.path().filename().string()
-                        << " (" << ase.m_samples.size() << " samples)\n";
-                }
-                catch (const std::exception& e)
-                {
-                    std::cerr << "ASE load failed for " << entry.path().filename().string()
-                        << ": " << e.what() << '\n';
-                }
-            }
-        }
     }
 
     // Load textures AFTER OpenGL context is created.
@@ -696,7 +704,7 @@ int main(int argc, char** argv)
     int vfs_selected = 0;
     std::vector<std::string> vfs_path_components;
     s_draw_context ctx;
-    ctx.window = window;
+    ctx.window = &window;
     ctx.camera = &camera;
     ctx.model = has_loaded_model ? &loaded_model : nullptr;
     ctx.has_model = has_loaded_model;
@@ -811,9 +819,13 @@ int main(int argc, char** argv)
                     }
                     break;
                 }
-                if (debug_menu.open && !vfs_open)
-                {
-                    if (debug_menu_input(debug_menu, event, running,
+                    if (debug_menu.open && !vfs_open)
+                    {
+                        s_event se{};
+                        se.type = e_event_type::key_down;
+                        se.key = sdl_key_to_e_key(static_cast<int>(event.key.key));
+                        se.mod = static_cast<int>(event.key.mod);
+                        if (debug_menu_input(debug_menu, se, running,
                         show_effect, show_collision, show_templates,
                         camera.m_framed, camera.m_yaw, camera.m_pitch,
                         vfs_open, vfs_path_components, vfs_selected,
@@ -1056,25 +1068,76 @@ int main(int argc, char** argv)
                                         const auto& nodes = loaded_stages[si].m_nodes;
                                         stage_worlds[si].resize(nodes.size());
                                         stage_groups[si].assign(nodes.size(), 2);
+                                        std::vector<sdbz::mat4> locals(nodes.size());
                                         for (std::size_t ni = 0; ni < nodes.size(); ++ni)
                                         {
                                             const auto& node = nodes[ni];
-                                            const sdbz::mat4 local = sdbz::trs_matrix(
+                                            locals[ni] = sdbz::trs_matrix(
                                                 node.m_translation, node.m_rotation_radians,
                                                 node.m_scale);
-                                            stage_worlds[si][ni] = (node.m_parent >= 0 &&
-                                                static_cast<std::size_t>(node.m_parent) < ni)
-                                                ? sdbz::mat4_mul(stage_worlds[si][
-                                                    static_cast<std::size_t>(node.m_parent)],
-                                                    local)
-                                                : local;
+                                        }
+                                        std::vector<std::uint8_t> xform_state(nodes.size(), 0);
+                                        for (std::size_t start = 0; start < nodes.size(); ++start)
+                                        {
+                                            if (xform_state[start] != 0) continue;
+                                            std::vector<std::size_t> stack;
+                                            stack.push_back(start);
+                                            while (!stack.empty())
+                                            {
+                                                const std::size_t idx = stack.back();
+                                                if (xform_state[idx] == 2)
+                                                {
+                                                    stack.pop_back();
+                                                    continue;
+                                                }
+                                                if (xform_state[idx] == 1)
+                                                {
+                                                    const int parent = nodes[idx].m_parent;
+                                                    if (parent >= 0 &&
+                                                        static_cast<std::size_t>(parent) < nodes.size())
+                                                    {
+                                                        stage_worlds[si][idx] = sdbz::mat4_mul(
+                                                            stage_worlds[si][static_cast<std::size_t>(parent)],
+                                                            locals[idx]);
+                                                    }
+                                                    else
+                                                    {
+                                                        stage_worlds[si][idx] = locals[idx];
+                                                    }
+                                                    xform_state[idx] = 2;
+                                                    stack.pop_back();
+                                                    continue;
+                                                }
+                                                if (xform_state[idx] == 0)
+                                                {
+                                                    const int parent = nodes[idx].m_parent;
+                                                    if (parent >= 0 &&
+                                                        static_cast<std::size_t>(parent) < nodes.size())
+                                                    {
+                                                        if (xform_state[static_cast<std::size_t>(parent)] == 1)
+                                                        {
+                                                            stage_worlds[si][idx] = locals[idx];
+                                                            xform_state[idx] = 2;
+                                                            stack.pop_back();
+                                                            continue;
+                                                        }
+                                                        if (xform_state[static_cast<std::size_t>(parent)] == 0)
+                                                        {
+                                                            stack.push_back(static_cast<std::size_t>(parent));
+                                                        }
+                                                    }
+                                                    xform_state[idx] = 1;
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                        for (std::size_t ni = 0; ni < nodes.size(); ++ni)
+                                        {
                                             std::size_t root = ni;
-                                            while (nodes[root].m_parent >= 0)
-                                                root = static_cast<std::size_t>(
-                                                    nodes[root].m_parent);
-                                            stage_groups[si][ni] = root ==
-                                                loaded_stages[si].m_stage_root ? 0 :
-                                                (root == loaded_stages[si].m_effect_root ? 1 : 2);
+                                            while (root < nodes.size() && nodes[root].m_parent >= 0)
+                                                root = static_cast<std::size_t>(nodes[root].m_parent);
+                                            stage_groups[si][ni] = (root == loaded_stages[si].m_stage_root) ? 0 :
+                                                ((root == loaded_stages[si].m_effect_root) ? 1 : 2);
                                         }
 
                                         has_loaded_stage = true;
@@ -1266,7 +1329,7 @@ int main(int argc, char** argv)
                     // Pan: slide the camera target along the camera's right/up axes so the
                     // scene follows the cursor. Ortho view spans 2*distance vertically.
                     int window_w = 0, window_h = 0;
-                    SDL_GetWindowSize(window, &window_w, &window_h);
+                    window.get_size_pixels(window_w, window_h);
                     const float units_per_pixel = 2.0f * camera.m_distance /
                         static_cast<float>(window_h > 0 ? window_h : 1);
                     const float dx = (event.motion.x - last_mouse_x) * units_per_pixel;
@@ -1323,7 +1386,7 @@ int main(int argc, char** argv)
         ctx.animation_time = animation_time;
 
         // Update per-frame context fields.
-        SDL_GetWindowSizeInPixels(window, &ctx.drawable_width, &ctx.drawable_height);
+        window.get_size_pixels(ctx.drawable_width, ctx.drawable_height);
         ctx.stage_index = loaded_stage_index;
         ctx.motion_clip_index = motion_clip_index;
         ctx.show_effect = show_effect;
@@ -1433,8 +1496,7 @@ int main(int argc, char** argv)
     {
         SDL_CloseGamepad(gamepad);
     }
-    SDL_GL_DestroyContext(gl_context);
-    SDL_DestroyWindow(window);
+    window.destroy();
     SDL_Quit();
     return 0;
 }

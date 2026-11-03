@@ -16,8 +16,8 @@ namespace sdbz
 
     struct s_texture_image
     {
-        std::uint32_t m_width = 0;
-        std::uint32_t m_height = 0;
+        std::uint32_t width = 0;
+        std::uint32_t height = 0;
         e_texture_format m_format = e_texture_format::rgba32;
         std::vector<std::uint8_t> m_rgba;
     };

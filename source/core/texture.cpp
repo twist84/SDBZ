@@ -98,8 +98,8 @@ namespace sdbz
         const std::size_t pixel_count = static_cast<std::size_t>(pixel_count64);
 
         s_texture_image result;
-        result.m_width = width;
-        result.m_height = height;
+        result.width = width;
+        result.height = height;
         result.m_rgba.reserve(pixel_count * 4);
 
         if (image_type == 3)
@@ -200,13 +200,13 @@ namespace sdbz
 
     void write_bmp_rgba(const std::filesystem::path& path, const s_texture_image& image)
     {
-        if (image.m_width == 0 || image.m_height == 0 ||
-            image.m_rgba.size() != static_cast<std::size_t>(image.m_width) * image.m_height * 4)
+        if (image.width == 0 || image.height == 0 ||
+            image.m_rgba.size() != static_cast<std::size_t>(image.width) * image.height * 4)
         {
             throw std::runtime_error("invalid RGBA texture supplied for BMP export");
         }
 
-        const std::uint64_t pixel_bytes64 = static_cast<std::uint64_t>(image.m_width) * image.m_height * 4;
+        const std::uint64_t pixel_bytes64 = static_cast<std::uint64_t>(image.width) * image.height * 4;
         if (pixel_bytes64 > (std::numeric_limits<std::uint32_t>::max)() - 54u)
         {
             throw std::runtime_error("texture is too large for a BMP file");
@@ -219,18 +219,18 @@ namespace sdbz
         write_u32_le(output, 2, static_cast<std::uint32_t>(output.size()));
         write_u32_le(output, 10, 54);
         write_u32_le(output, 14, 40);
-        write_u32_le(output, 18, image.m_width);
-        write_u32_le(output, 22, image.m_height);
+        write_u32_le(output, 18, image.width);
+        write_u32_le(output, 22, image.height);
         write_u16_le(output, 26, 1);
         write_u16_le(output, 28, 32);
         write_u32_le(output, 34, pixel_bytes);
 
-        const std::size_t row_size = static_cast<std::size_t>(image.m_width) * 4;
-        for (std::uint32_t y = 0; y < image.m_height; ++y)
+        const std::size_t row_size = static_cast<std::size_t>(image.width) * 4;
+        for (std::uint32_t y = 0; y < image.height; ++y)
         {
             const std::size_t source_row = static_cast<std::size_t>(y) * row_size;
-            const std::size_t destination_row = 54 + static_cast<std::size_t>(image.m_height - 1 - y) * row_size;
-            for (std::uint32_t x = 0; x < image.m_width; ++x)
+            const std::size_t destination_row = 54 + static_cast<std::size_t>(image.height - 1 - y) * row_size;
+            for (std::uint32_t x = 0; x < image.width; ++x)
             {
                 const std::size_t source = source_row + static_cast<std::size_t>(x) * 4;
                 const std::size_t destination = destination_row + static_cast<std::size_t>(x) * 4;

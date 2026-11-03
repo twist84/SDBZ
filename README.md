@@ -18,10 +18,10 @@ This repository is the initial native reconstruction implementation. It is a rea
 - Static OBJ bind-pose export, including rigid hierarchy transforms. This is an inspection export; it does not bake animation or deform skinned meshes.
 - ELF32 little-endian/MIPS header and table inspection for the supplied PS2 executable.
 - Command-line tools for archive inspection, extraction, rebuilding, texture conversion, model inspection, and OBJ export.
-- Optional SDL3 application bootstrap with a fixed 60 Hz simulation loop, keyboard input, an input-driven placeholder battle scene, and PIX texture preview.
+- Optional SDL3 application with an OpenGL renderer, asset viewer, Archive VFS browser, and debug menu.
 - Automated core tests covering archive codec/table parsing, the 1,934-entry European-beta fixture, archive rebuilding, chunk parsing, TIM2 decoding, synthetic FMDL geometry/OBJ export, MOT2/RFSM sampling, STG/HIT parsing, and ELF inspection.
 
-The graphical bootstrap currently uses SDL3's 2D renderer API for the placeholder scene and texture preview. It is intentionally a platform bring-up step, not the final 3D renderer. SDL3 GPU, skeletal rendering, textured stage assembly, combat, sound, and original menus remain subsequent milestones. The STG reader exposes hierarchy and TRS data but does not yet construct a runtime stage scene.
+The graphical runtime uses an OpenGL renderer for model/stage/texture viewing, with an Archive VFS browser and debug menu. SDL3 GPU, skeletal animation playback, combat, sound, and original menus remain subsequent milestones. The STG reader exposes hierarchy and TRS data and assembles runtime stage scenes for viewing.
 
 See [BUILD_STATUS.md](BUILD_STATUS.md) for the exact compiler/test matrix and the SDL3 verification limitation.
 
