@@ -83,6 +83,7 @@ if(SDBZ_BUILD_GAME)
         add_executable(sdbz_game
             source/platform/sdl_main.cpp
             source/assets/assets.cpp
+            source/interface/debug_menu/debug_menu.cpp
             source/render/renderer.cpp
         )
         target_link_libraries(sdbz_game PRIVATE sdbz_core SDL3::SDL3)

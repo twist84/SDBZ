@@ -20,6 +20,7 @@ namespace sdbz
         std::uint32_t m_sector_offset = 0;
         std::uint32_t m_sector_count = 0;
         std::uint32_t m_byte_size = 0;
+        bool m_is_directory = false;
 
         [[nodiscard]] std::uint64_t offset() const noexcept;
         [[nodiscard]] std::uint64_t allocated_size() const noexcept;

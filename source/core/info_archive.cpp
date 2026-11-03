@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
+#include <unordered_set>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -290,6 +291,35 @@ namespace sdbz
                 *sectors,
                 *byte_size
             });
+        }
+
+        // Compute directory prefixes: any entry name that is a proper prefix
+        // (followed by \\ or /) of another entry is a directory.
+        std::unordered_set<std::string> directory_prefixes;
+        for (const auto& entry : result.m_entries)
+        {
+            const std::string& entry_name = entry.m_name_cp932;
+            std::string acc;
+            for (char ch : entry_name)
+            {
+                if (ch == '\\' || ch == '/')
+                {
+                    directory_prefixes.insert(acc);
+                    acc.clear();
+                }
+                else
+                {
+                    acc.push_back(ch);
+                }
+            }
+        }
+        // Mark entries whose name is a directory prefix.
+        for (auto& entry : result.m_entries)
+        {
+            if (directory_prefixes.count(entry.m_name_cp932) != 0)
+            {
+                entry.m_is_directory = true;
+            }
         }
 
         std::vector<const s_archive_entry*> sorted;

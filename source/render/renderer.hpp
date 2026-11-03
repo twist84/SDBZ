@@ -14,10 +14,13 @@
 
 #include "assets/assets.hpp"
 #include "core/animation.hpp"
+#include "core/info_archive.hpp"
 #include "core/math.hpp"
 #include "core/model.hpp"
 #include "core/stage.hpp"
 #include "core/texture.hpp"
+
+#include "interface/debug_menu/debug_menu.hpp"
 
 namespace fs = std::filesystem;
 
@@ -31,14 +34,6 @@ struct s_camera
     bool m_framed = false; // auto-fit once; F re-fits
 };
 
-// One selectable debug-menu row (label + current value). The platform layer
-// owns the action logic; the renderer only draws label/value.
-struct s_menu_item
-{
-    std::string label;
-    std::string value;
-};
-
 // All state required to render a viewer frame. Pointers are non-owning.
 struct s_draw_context
 {
@@ -48,16 +43,22 @@ struct s_draw_context
 
     const s_camera* camera = nullptr;
 
-    // Debug menu (F1 toggles). Filled by the platform layer each frame.
-    bool debug_open = false;
-    int debug_selected = 0;
-    std::vector<s_menu_item> debug_menu;
+    // Debug menu system (owned by platform layer).
+    sdbz::s_debug_menu debug;
 
-    // Virtual file system browser (entered from the debug menu).
+    // Virtual file system browser over an INFO.DAT/GAME.DAT archive.
     bool vfs_open = false;
-    fs::path vfs_path;
     int vfs_selected = 0;
-    std::vector<std::pair<std::string, bool>> vfs_entries; // name, is_dir
+    const sdbz::s_archive* vfs_archive = nullptr;
+    const std::vector<std::uint8_t>* vfs_game_data = nullptr;
+    struct s_vfs_entry
+    {
+        std::size_t index = 0;      // index into archive entries
+        std::string name;           // child name (directory or file)
+        bool is_dir = false;
+    };
+    std::vector<s_vfs_entry> vfs_entries;
+    std::vector<std::string> vfs_path_components; // breadcrumb path components
 
     // Model viewer.
     const sdbz::s_model* model = nullptr;

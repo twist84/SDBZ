@@ -715,6 +715,7 @@ void render_frame(s_draw_context& ctx)
                     const float extent = std::max({ hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2] });
                     const_cast<s_camera&>(*ctx.camera).m_distance = std::max(extent * 0.6f, 0.1f);
                     const_cast<s_camera&>(*ctx.camera).m_pitch = -30.0f; // look down on the stage
+                    const_cast<s_camera&>(*ctx.camera).m_yaw = -30.0f; // angled view of the stage
                     std::cout << "Stage bbox: (" << lo[0] << "," << lo[1] << "," << lo[2] << ") to ("
                         << hi[0] << "," << hi[1] << "," << hi[2] << ") distance="
                         << ctx.camera->m_distance << '\n';
@@ -856,7 +857,7 @@ void render_frame(s_draw_context& ctx)
     }
 
     // ---- HUD text ----
-    if (ctx.has_font && ctx.font && ctx.glyph_textures)
+    if (!ctx.debug.open && ctx.has_font && ctx.font && ctx.glyph_textures)
     {
         begin_2d(drawable_width, drawable_height);
 
@@ -926,50 +927,32 @@ void render_frame(s_draw_context& ctx)
     }
 
     // Debug menu overlay (drawn on top of the scene/HUD).
-    if (ctx.debug_open && ctx.has_font && ctx.font && ctx.glyph_textures &&
-        !ctx.debug_menu.empty())
+    if (ctx.debug.open && ctx.has_font && ctx.font && ctx.glyph_textures)
     {
-        begin_2d(ctx.drawable_width, ctx.drawable_height);
-        draw_text("DEBUG MENU  (F1 close)", 10.0f, 60.0f, 1.0f, 255, 255, 0,
+        debug_menu_draw(ctx.debug, ctx.drawable_width, ctx.drawable_height,
             *ctx.font, *ctx.glyph_textures);
-        float y = 84.0f;
-        for (std::size_t i = 0; i < ctx.debug_menu.size(); ++i)
-        {
-            const bool selected = (static_cast<int>(i) == ctx.debug_selected);
-            const std::uint8_t r = selected ? 255 : 200;
-            const std::uint8_t g = selected ? 255 : 200;
-            const std::uint8_t b = selected ? 100 : 200;
-            std::string line = (selected ? "> " : "  ") + ctx.debug_menu[i].label;
-            if (!ctx.debug_menu[i].value.empty())
-            {
-                line += "  [" + ctx.debug_menu[i].value + "]";
-            }
-            draw_text(line, 10.0f, y, 0.8f, r, g, b, *ctx.font, *ctx.glyph_textures);
-            y += 20.0f;
-        }
-        draw_text("Up/Down: navigate  |  Left/Right: change  |  Enter: activate",
-            10.0f, y + 6.0f, 0.6f, 160, 160, 160, *ctx.font, *ctx.glyph_textures);
-        end_2d();
     }
 
-    // Virtual file system browser overlay.
+    // Virtual file system browser overlay over an INFO.DAT/GAME.DAT archive.
     if (ctx.vfs_open && ctx.has_font && ctx.font && ctx.glyph_textures &&
-        !ctx.vfs_entries.empty())
+        ctx.vfs_archive && !ctx.vfs_entries.empty())
     {
         begin_2d(ctx.drawable_width, ctx.drawable_height);
-        draw_text("VIRTUAL FILE SYSTEM  (Backspace: up  |  Esc: close)", 10.0f, 60.0f,
+        draw_text("ARCHIVE VFS  (INFO.DAT/GAME.DAT)  (Esc: close)", 10.0f, 10.0f,
             1.0f, 255, 255, 0, *ctx.font, *ctx.glyph_textures);
-        std::string path_str = ctx.vfs_path.string();
-        if (path_str.size() > 95)
+        // Breadcrumb path.
+        std::string breadcrumb;
+        for (std::size_t i = 0; i < ctx.vfs_path_components.size(); ++i)
         {
-            path_str = "..." + path_str.substr(path_str.size() - 92);
+            if (i != 0) breadcrumb += " > ";
+            breadcrumb += ctx.vfs_path_components[i];
         }
-        draw_text("Path: " + path_str, 10.0f, 84.0f, 0.7f, 200, 200, 200,
+        if (breadcrumb.empty()) breadcrumb = "(root)";
+        draw_text("Path: " + breadcrumb, 10.0f, 32.0f, 0.7f, 200, 200, 200,
             *ctx.font, *ctx.glyph_textures);
-        float y = 106.0f;
-        int max_entries = (ctx.drawable_height - 130) / 18;
+        float y = 54.0f;
+        int max_entries = (ctx.drawable_height - 126) / 18;
         if (max_entries < 1) max_entries = 1;
-        // Scroll so selection stays visible.
         int start = 0;
         if (ctx.vfs_selected >= start + max_entries)
             start = ctx.vfs_selected - max_entries + 1;
@@ -981,18 +964,19 @@ void render_frame(s_draw_context& ctx)
         if (start < 0) start = 0;
         for (int i = start; i < start + max_entries && i < static_cast<int>(ctx.vfs_entries.size()); ++i)
         {
+            const auto& ve = ctx.vfs_entries[i];
             const bool selected = (i == ctx.vfs_selected);
             const std::uint8_t r = selected ? 255 : 200;
             const std::uint8_t g = selected ? 255 : 200;
             const std::uint8_t b = selected ? 100 : 200;
             std::string line = (selected ? "> " : "  ");
-            line += ctx.vfs_entries[i].second ? "[dir] " : "[file]";
-            line += ctx.vfs_entries[i].first;
+            line += (ve.is_dir ? "[dir] " : "[file]") + ve.name;
             draw_text(line, 10.0f, y, 0.7f, r, g, b, *ctx.font, *ctx.glyph_textures);
             y += 18.0f;
         }
-        draw_text("Enter: enter dir / load file", 10.0f, static_cast<float>(ctx.drawable_height) - 24.0f,
-            0.6f, 160, 160, 160, *ctx.font, *ctx.glyph_textures);
+        draw_text("Enter: enter dir / load file  |  Backspace: up  |  Esc: close",
+            10.0f, static_cast<float>(ctx.drawable_height) - 24.0f, 0.6f, 160, 160, 160,
+            *ctx.font, *ctx.glyph_textures);
         end_2d();
     }
 
