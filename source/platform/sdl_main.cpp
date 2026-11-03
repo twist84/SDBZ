@@ -750,6 +750,8 @@ int main(int argc, char** argv)
     bool pan_button_down = false; // right (or middle) mouse button
     int last_mouse_x = 0;
     int last_mouse_y = 0;
+    int cur_mouse_x = 0;
+    int cur_mouse_y = 0;
 
     auto previous = SDL_GetPerformanceCounter();
     const double frequency = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -1291,6 +1293,8 @@ int main(int argc, char** argv)
                     left_button_down = true;
                     last_mouse_x = static_cast<int>(event.button.x);
                     last_mouse_y = static_cast<int>(event.button.y);
+                    cur_mouse_x = last_mouse_x;
+                    cur_mouse_y = last_mouse_y;
                 }
                 else if (event.button.button == SDL_BUTTON_RIGHT ||
                     event.button.button == SDL_BUTTON_MIDDLE)
@@ -1298,6 +1302,8 @@ int main(int argc, char** argv)
                     pan_button_down = true;
                     last_mouse_x = static_cast<int>(event.button.x);
                     last_mouse_y = static_cast<int>(event.button.y);
+                    cur_mouse_x = last_mouse_x;
+                    cur_mouse_y = last_mouse_y;
                 }
                 break;
             case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -1312,6 +1318,8 @@ int main(int argc, char** argv)
                 }
                 break;
             case SDL_EVENT_MOUSE_MOTION:
+                cur_mouse_x = static_cast<int>(event.motion.x);
+                cur_mouse_y = static_cast<int>(event.motion.y);
                 if (left_button_down)
                 {
                     const int dx = static_cast<int>(event.motion.x) - last_mouse_x;
@@ -1350,8 +1358,42 @@ int main(int argc, char** argv)
                 }
                 break;
             case SDL_EVENT_MOUSE_WHEEL:
-                camera.m_distance = std::clamp(camera.m_distance * std::pow(0.88f, static_cast<float>(event.wheel.y)), 0.05f, 1.0e6f);
+            {
+                // Zoom toward the mouse cursor: keep the world point under the
+                // cursor at the same screen position as the ortho volume scales.
+                const float wheel = static_cast<float>(event.wheel.y);
+                const float prev_distance = camera.m_distance;
+                camera.m_distance =
+                    std::clamp(camera.m_distance * std::pow(0.88f, wheel), 0.05f, 1.0e6f);
+                const float dd = prev_distance - camera.m_distance;
+                if (dd != 0.0f)
+                {
+                    int window_w = 0, window_h = 0;
+                    window.get_size_pixels(window_w, window_h);
+                    if (window_w > 0 && window_h > 0)
+                    {
+                        // View-space delta between old and new projection at the cursor.
+                        // dv = (dd/h) * (2*mx - w, h - 2*my, 0)
+                        const float scale = dd / static_cast<float>(window_h);
+                        const float dv_x = scale * (2.0f * static_cast<float>(cur_mouse_x) -
+                            static_cast<float>(window_w));
+                        const float dv_y = scale * (static_cast<float>(window_h) -
+                            2.0f * static_cast<float>(cur_mouse_y));
+                        // Rotate view-space delta into world space by the inverse
+                        // camera rotation (yaw then pitch).
+                        const float k_deg_to_rad = 0.01745329251994329577f;
+                        const float yaw = camera.m_yaw * k_deg_to_rad;
+                        const float pitch = camera.m_pitch * k_deg_to_rad;
+                        const float cy = std::cos(yaw), sy = std::sin(yaw);
+                        const float cp = std::cos(pitch), sp = std::sin(pitch);
+                        camera.m_target[0] += dv_x * cy + dv_y * sp * sy;
+                        camera.m_target[1] += dv_y * cp;
+                        camera.m_target[2] += -dv_x * sy + dv_y * (sp * cy - cp * sy);
+                    }
+                }
+                camera.m_framed = true;
                 break;
+            }
             case SDL_EVENT_GAMEPAD_ADDED:
                 if (!gamepad)
                 {
