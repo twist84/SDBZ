@@ -7,12 +7,11 @@
 #include <span>
 #include <string_view>
 
-bool load_ffon(const fs::path& path, s_ffon_font& font)
+bool load_ffon(const std::vector<std::uint8_t>& data, s_ffon_font& font)
 {
-    auto data = sdbz::read_file(path);
     if (data.size() < 0x40 || std::string_view(reinterpret_cast<const char*>(data.data()), 4) != "FFON")
     {
-        std::cerr << "Not an FFON file: " << path << '\n';
+        std::cerr << "Not an FFON data blob\\n";
         return false;
     }
 
@@ -48,8 +47,8 @@ bool load_ffon(const fs::path& path, s_ffon_font& font)
         std::memcpy(font.glyphs[gi].data(), data.data() + offset, font.bytes_per_glyph);
     }
 
-    std::cout << "Loaded FFON font: " << path.filename().string()
-        << " (" << glyph_count << " glyphs, " << width << "x" << height << ")\n";
+    std::cout << "Loaded FFON font: " << glyph_count << " glyphs, "
+        << (int)width << "x" << (int)height << '\n';
     return true;
 }
 

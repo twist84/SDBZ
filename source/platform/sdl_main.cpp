@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 #include <limits>
+#include <span>
 
 #include "assets/assets.hpp"
 #include "core/animation.hpp"
@@ -42,22 +43,23 @@ int main(int argc, char** argv)
     fs::path game_path;
     bool explicit_motion = false;
     std::vector<std::string> mesh_filters;
-    for (int i = 1; i < argc; ++i)
+    std::span<char*> args(argv + 1, static_cast<size_t>(argc - 1));
+    for (size_t i = 0; i < args.size(); ++i)
     {
-        const std::string arg = argv[i];
-        if (arg == "--mesh" && i + 1 < argc)
+        const std::string arg = args[i];
+        if (arg == "--mesh" && i + 1 < args.size())
         {
-            mesh_filters.push_back(argv[++i]);
+            mesh_filters.push_back(args[++i]);
             continue;
         }
-        if (arg == "--info" && i + 1 < argc)
+        if (arg == "--info" && i + 1 < args.size())
         {
-            info_path = argv[++i];
+            info_path = args[++i];
             continue;
         }
-        if (arg == "--game" && i + 1 < argc)
+        if (arg == "--game" && i + 1 < args.size())
         {
-            game_path = argv[++i];
+            game_path = args[++i];
             continue;
         }
         // First non-flag argument is the input model/path.
@@ -80,6 +82,104 @@ int main(int argc, char** argv)
     if (input_path == "assets/extracted")
     {
         std::cout << "Input: " << input_path.string() << '\n';
+    }
+    // Archive state (INFO.DAT / GAME.DAT).
+    sdbz::s_archive loaded_archive;
+    bool has_loaded_archive = false;
+    std::vector<std::uint8_t> game_data;
+    bool has_game_data = false;
+    // Auto-detect INFO.DAT/GAME.DAT next to the input path if not explicitly provided.
+    if (!has_loaded_archive && !info_path.empty() && !game_path.empty() &&
+        fs::is_regular_file(info_path) && fs::is_regular_file(game_path))
+    {
+        try
+        {
+            const auto info_data = sdbz::read_file(info_path);
+            loaded_archive = sdbz::s_archive::from_encoded_info(info_data);
+            has_loaded_archive = true;
+            game_data = sdbz::read_file(game_path);
+            has_game_data = true;
+    std::cout << "Loaded archive: " << info_path.filename().string()
+        << " (" << loaded_archive.m_entries.size() << " entries) + "
+        << game_path.filename().string() << " (" << game_data.size() << " bytes)\n";
+        }
+        catch (const std::exception& exception)
+        {
+            std::cerr << "Archive load unavailable: " << exception.what() << '\n';
+            has_loaded_archive = false;
+            has_game_data = false;
+        }
+    }
+
+    if (!has_loaded_archive)
+    {
+        const fs::path input_dir = fs::is_regular_file(input_path)
+            ? input_path.parent_path()
+            : input_path;
+        const auto auto_info = input_dir / "INFO.DAT";
+        const auto auto_game = input_dir / "GAME.DAT";
+        if (fs::is_regular_file(auto_info) && fs::is_regular_file(auto_game))
+        {
+            try
+            {
+                const auto info_data = sdbz::read_file(auto_info);
+                loaded_archive = sdbz::s_archive::from_encoded_info(info_data);
+                has_loaded_archive = true;
+                game_data = sdbz::read_file(auto_game);
+                has_game_data = true;
+                std::cout << "Auto-loaded archive: " << auto_info.filename().string()
+                    << " (" << loaded_archive.m_entries.size() << " entries) + "
+                    << auto_game.filename().string() << " (" << game_data.size() << " bytes)\n";
+            }
+            catch (const std::exception& exception)
+            {
+                std::cerr << "Archive auto-load unavailable: " << exception.what() << '\n';
+                has_loaded_archive = false;
+                has_game_data = false;
+            }
+        }
+    }
+
+    if (!has_loaded_archive)
+    {
+        // Fallback to workingdir/assets/original/INFO.DAT + GAME.DAT.
+        // Derive the working directory from the executable's location since
+        // fs::current_path() may not match the cmd working directory.
+        fs::path exe_dir = fs::absolute(argv[0]).parent_path();
+        // Try walking up from the executable to find assets/original.
+        std::vector<fs::path> candidate_dirs;
+        candidate_dirs.push_back(fs::current_path());
+        candidate_dirs.push_back(exe_dir);
+        candidate_dirs.push_back(exe_dir.parent_path());
+        candidate_dirs.push_back(exe_dir.parent_path().parent_path());
+        candidate_dirs.push_back(exe_dir.parent_path().parent_path().parent_path());
+
+        for (const auto& dir : candidate_dirs)
+        {
+            const auto fallback_info = dir / "assets" / "original" / "INFO.DAT";
+            const auto fallback_game = dir / "assets" / "original" / "GAME.DAT";
+            if (fs::is_regular_file(fallback_info) && fs::is_regular_file(fallback_game))
+            {
+                try
+                {
+                    const auto info_data = sdbz::read_file(fallback_info);
+                    loaded_archive = sdbz::s_archive::from_encoded_info(info_data);
+                    has_loaded_archive = true;
+                    game_data = sdbz::read_file(fallback_game);
+                    has_game_data = true;
+                    std::cout << "Loaded archive fallback: " << fallback_info.string()
+                        << " (" << loaded_archive.m_entries.size() << " entries) + "
+                        << fallback_game.string() << " (" << game_data.size() << " bytes)\n";
+                    break;
+                }
+                catch (const std::exception& exception)
+                {
+                    std::cerr << "Archive auto-load fallback unavailable: " << exception.what() << '\n';
+                    has_loaded_archive = false;
+                    has_game_data = false;
+                }
+            }
+        }
     }
 
     // Detect the input file type.
@@ -128,13 +228,10 @@ int main(int argc, char** argv)
     // FFON font.
     s_ffon_font font;
     bool has_font = false;
+    std::vector<std::uint8_t> archive_font_data;
+    bool has_archive_font = false;
     std::vector<GLuint> glyph_textures;
 
-    // Archive state (INFO.DAT / GAME.DAT).
-    sdbz::s_archive loaded_archive;
-    bool has_loaded_archive = false;
-    std::vector<std::uint8_t> game_data;
-    bool has_game_data = false;
 
 
     // ---- Asset discovery + parsing from disk (no GL context required) ----
@@ -444,12 +541,6 @@ int main(int argc, char** argv)
             if (motion_paths.empty()) std::cout << "No .pmt motion package found next to the model\n";
         }
     }
-    if (font_path.empty())
-    {
-        font_path = find_font_near(is_mdl || is_pix || is_hit || is_stg
-            ? directory_of(input_path) : input_path);
-        if (!font_path.empty()) std::cout << "Auto font: " << font_path.string() << '\n';
-    }
 
     // Load every motion package and merge their clips into one list.
     for (const auto& path : motion_paths)
@@ -480,98 +571,35 @@ int main(int argc, char** argv)
     }
     if (has_loaded_motion && loaded_motion.m_motions.empty()) has_loaded_motion = false;
 
-    // Auto-detect INFO.DAT/GAME.DAT next to the input path if not explicitly provided.
-    if (!has_loaded_archive && !info_path.empty() && !game_path.empty() &&
-        fs::is_regular_file(info_path) && fs::is_regular_file(game_path))
-    {
-        try
-        {
-            const auto info_data = sdbz::read_file(info_path);
-            loaded_archive = sdbz::s_archive::from_encoded_info(info_data);
-            has_loaded_archive = true;
-            game_data = sdbz::read_file(game_path);
-            has_game_data = true;
-    std::cout << "Loaded archive: " << info_path.filename().string()
-        << " (" << loaded_archive.m_entries.size() << " entries) + "
-        << game_path.filename().string() << " (" << game_data.size() << " bytes)\n";
-        }
-        catch (const std::exception& exception)
-        {
-            std::cerr << "Archive load unavailable: " << exception.what() << '\n';
-            has_loaded_archive = false;
-            has_game_data = false;
-        }
-    }
 
-    if (!has_loaded_archive)
+    // Prefer fonts from the archive when available.
+    if (has_loaded_archive && has_game_data)
     {
-        const fs::path input_dir = fs::is_regular_file(input_path)
-            ? input_path.parent_path()
-            : input_path;
-        const auto auto_info = input_dir / "INFO.DAT";
-        const auto auto_game = input_dir / "GAME.DAT";
-        if (fs::is_regular_file(auto_info) && fs::is_regular_file(auto_game))
+        for (const auto& entry : loaded_archive.m_entries)
         {
-            try
+            const std::string name = lower_copy(entry.m_name_cp932);
+            if (name.size() >= 4 && name.compare(name.size() - 4, 4, ".fon") == 0)
             {
-                const auto info_data = sdbz::read_file(auto_info);
-                loaded_archive = sdbz::s_archive::from_encoded_info(info_data);
-                has_loaded_archive = true;
-                game_data = sdbz::read_file(auto_game);
-                has_game_data = true;
-                std::cout << "Auto-loaded archive: " << auto_info.filename().string()
-                    << " (" << loaded_archive.m_entries.size() << " entries) + "
-                    << auto_game.filename().string() << " (" << game_data.size() << " bytes)\n";
-            }
-            catch (const std::exception& exception)
-            {
-                std::cerr << "Archive auto-load unavailable: " << exception.what() << '\n';
-                has_loaded_archive = false;
-                has_game_data = false;
-            }
-        }
-    }
-
-    if (!has_loaded_archive)
-    {
-        // Fallback to workingdir/assets/original/INFO.DAT + GAME.DAT.
-        // Derive the working directory from the executable's location since
-        // fs::current_path() may not match the cmd working directory.
-        fs::path exe_dir = fs::absolute(argv[0]).parent_path();
-        // Try walking up from the executable to find assets/original.
-        std::vector<fs::path> candidate_dirs;
-        candidate_dirs.push_back(fs::current_path());
-        candidate_dirs.push_back(exe_dir);
-        candidate_dirs.push_back(exe_dir.parent_path());
-        candidate_dirs.push_back(exe_dir.parent_path().parent_path());
-        candidate_dirs.push_back(exe_dir.parent_path().parent_path().parent_path());
-
-        for (const auto& dir : candidate_dirs)
-        {
-            const auto fallback_info = dir / "assets" / "original" / "INFO.DAT";
-            const auto fallback_game = dir / "assets" / "original" / "GAME.DAT";
-            if (fs::is_regular_file(fallback_info) && fs::is_regular_file(fallback_game))
-            {
-                try
+                const std::uint64_t offset = entry.offset();
+                const std::uint64_t byte_size = entry.m_byte_size;
+                if (offset + byte_size <= game_data.size())
                 {
-                    const auto info_data = sdbz::read_file(fallback_info);
-                    loaded_archive = sdbz::s_archive::from_encoded_info(info_data);
-                    has_loaded_archive = true;
-                    game_data = sdbz::read_file(fallback_game);
-                    has_game_data = true;
-                    std::cout << "Loaded archive fallback: " << fallback_info.string()
-                        << " (" << loaded_archive.m_entries.size() << " entries) + "
-                        << fallback_game.string() << " (" << game_data.size() << " bytes)\n";
+                    archive_font_data.assign(game_data.data() + offset,
+                        game_data.data() + offset + byte_size);
+                    has_archive_font = true;
+                    std::cout << "Auto font from archive: " << entry.m_name_cp932 << '\n';
                     break;
                 }
-                catch (const std::exception& exception)
-                {
-                    std::cerr << "Archive auto-load fallback unavailable: " << exception.what() << '\n';
-                    has_loaded_archive = false;
-                    has_game_data = false;
-                }
             }
         }
+    }
+
+    // If the archive provided no font, fall back to a .fon next to the input.
+    if (!has_archive_font && font_path.empty())
+    {
+        font_path = find_font_near(is_mdl || is_pix || is_hit || is_stg
+            ? directory_of(input_path) : input_path);
+        if (!font_path.empty()) std::cout << "Auto font: " << font_path.string() << '\n';
     }
 
     // ---- SDL / OpenGL / audio platform initialisation ----
@@ -625,23 +653,28 @@ int main(int argc, char** argv)
     }
 
     // Load FFON font AFTER OpenGL context is created.
-    if (!font_path.empty() && fs::is_regular_file(font_path))
+    if ((has_archive_font && !archive_font_data.empty()) || !font_path.empty())
     {
-        if (has_extension(font_path, ".fon"))
+        try
         {
-            try
+            if (has_archive_font && !archive_font_data.empty())
             {
-                has_font = load_ffon(font_path, font);
-                if (has_font)
-                {
-                    upload_glyph_textures(font, glyph_textures);
-                    std::cout << "Loaded " << glyph_textures.size() << " glyph textures\n";
-                }
+                has_font = load_ffon(archive_font_data, font);
             }
-            catch (const std::exception& exception)
+            else
             {
-                std::cerr << "Font load unavailable: " << exception.what() << '\n';
+                const auto font_data = sdbz::read_file(font_path);
+                has_font = load_ffon(font_data, font);
             }
+            if (has_font)
+            {
+                upload_glyph_textures(font, glyph_textures);
+                std::cout << "Loaded " << glyph_textures.size() << " glyph textures\n";
+            }
+        }
+        catch (const std::exception& exception)
+        {
+            std::cerr << "Font load unavailable: " << exception.what() << '\n';
         }
     }
     std::cout << "SDL init done\n";
@@ -912,6 +945,8 @@ int main(int argc, char** argv)
                                 }
                                 else if (ext == ".pix" || ext == ".PIX")
                                 {
+                                    for (GLuint t : texture_names)
+                                        if (t) glDeleteTextures(1, &t);
                                     texture_names = load_fpix_textures(
                                         std::vector<std::uint8_t>(
                                             entry_data.begin(), entry_data.end()));
@@ -921,11 +956,12 @@ int main(int argc, char** argv)
                                 }
                                 else if (ext == ".fon" || ext == ".FON")
                                 {
-                                    // Write font to temp file for load_ffon (takes a path).
-                                    const fs::path temp_font =
-                                        fs::temp_directory_path() / "sdbz_vfs_font.fon";
-                                    sdbz::write_file(temp_font, entry_data);
-                                    has_font = load_ffon(temp_font, font);
+                                    for (GLuint t : glyph_textures)
+                                        if (t) glDeleteTextures(1, &t);
+                                    glyph_textures.clear();
+                                    has_font = load_ffon(
+                                        std::vector<std::uint8_t>(entry_data.begin(), entry_data.end()),
+                                        font);
                                     if (has_font)
                                     {
                                         upload_glyph_textures(font, glyph_textures);
@@ -947,6 +983,32 @@ int main(int argc, char** argv)
                                 {
                                     try
                                     {
+                                        // Clear any previously loaded stage to avoid memory buildup.
+                                        for (auto& lists : stage_mesh_lists)
+                                            for (GLuint l : lists)
+                                                if (l) glDeleteLists(l, 1);
+                                        for (auto& texs : stage_textures)
+                                            for (GLuint t : texs)
+                                                if (t) glDeleteTextures(1, &t);
+                                        stage_mesh_lists.clear(); stage_mesh_lists.shrink_to_fit();
+                                        loaded_stages.clear(); loaded_stages.shrink_to_fit();
+                                        stage_models.clear(); stage_models.shrink_to_fit();
+                                        stage_models_loaded.clear(); stage_models_loaded.shrink_to_fit();
+                                        stage_hits.clear(); stage_hits.shrink_to_fit();
+                                        stage_hits_loaded.clear(); stage_hits_loaded.shrink_to_fit();
+                                        stage_textures.clear(); stage_textures.shrink_to_fit();
+                                        stage_textures_loaded.clear(); stage_textures_loaded.shrink_to_fit();
+                                        stage_pix_paths.clear(); stage_pix_paths.shrink_to_fit();
+                                        stage_pix_entry_indices.clear(); stage_pix_entry_indices.shrink_to_fit();
+                                        stage_worlds.clear(); stage_worlds.shrink_to_fit();
+                                        stage_groups.clear(); stage_groups.shrink_to_fit();
+                                        stage_meshes_by_names.clear(); stage_meshes_by_names.shrink_to_fit();
+                                        stage_hit_by_names.clear(); stage_hit_by_names.shrink_to_fit();
+                                        has_loaded_stage = false;
+                                        has_stage_model = false;
+                                        has_stage_hit = false;
+                                        loaded_stage_index = 0;
+
                                         const std::string stage_stem =
                                             fs::path(name).stem().string();
                                         sdbz::s_stage stg = sdbz::parse_stg(entry_data);
@@ -1078,7 +1140,7 @@ int main(int argc, char** argv)
                                                         !stage_textures.back().empty();
                                                     std::cout << "Loaded stage textures from archive: "
                                                         << pix_entry_ref.m_name_cp932 << ": "
-                                                        << stage_textures.back().size() << " textures\\n";
+                                                        << stage_textures.back().size() << " textures\n";
                                                 }
                                             }
                                             catch (const std::exception& exception)
@@ -1464,6 +1526,8 @@ int main(int argc, char** argv)
         // Update per-frame context fields.
         window.get_size_pixels(ctx.drawable_width, ctx.drawable_height);
         ctx.stages = has_loaded_stage ? &loaded_stages : nullptr;
+        ctx.has_font = has_font;
+        ctx.font = has_font ? &font : nullptr;
         ctx.has_stage = has_loaded_stage;
         ctx.stage_index = loaded_stage_index;
         ctx.has_stage_model = has_stage_model;

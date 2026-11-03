@@ -27,7 +27,7 @@ struct s_ffon_font
     std::vector<std::vector<std::uint8_t>> glyphs; // glyph_id -> raw 4bpp pixels
 };
 
-[[nodiscard]] bool load_ffon(const fs::path& path, s_ffon_font& font);
+[[nodiscard]] bool load_ffon(const std::vector<std::uint8_t>& data, s_ffon_font& font);
 
 // Horizontal ink bounds [left, right) of a glyph in pixels; (0,0) if blank.
 [[nodiscard]] std::pair<int, int> glyph_ink_bounds(const s_ffon_font& font,
