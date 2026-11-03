@@ -925,6 +925,33 @@ void render_frame(s_draw_context& ctx)
         end_2d();
     }
 
+    // Debug menu overlay (drawn on top of the scene/HUD).
+    if (ctx.debug_open && ctx.has_font && ctx.font && ctx.glyph_textures &&
+        !ctx.debug_menu.empty())
+    {
+        begin_2d(ctx.drawable_width, ctx.drawable_height);
+        draw_text("DEBUG MENU  (F1 close)", 10.0f, 60.0f, 1.0f, 255, 255, 0,
+            *ctx.font, *ctx.glyph_textures);
+        float y = 84.0f;
+        for (std::size_t i = 0; i < ctx.debug_menu.size(); ++i)
+        {
+            const bool selected = (static_cast<int>(i) == ctx.debug_selected);
+            const std::uint8_t r = selected ? 255 : 200;
+            const std::uint8_t g = selected ? 255 : 200;
+            const std::uint8_t b = selected ? 100 : 200;
+            std::string line = (selected ? "> " : "  ") + ctx.debug_menu[i].label;
+            if (!ctx.debug_menu[i].value.empty())
+            {
+                line += "  [" + ctx.debug_menu[i].value + "]";
+            }
+            draw_text(line, 10.0f, y, 0.8f, r, g, b, *ctx.font, *ctx.glyph_textures);
+            y += 20.0f;
+        }
+        draw_text("Up/Down: navigate  |  Left/Right: change  |  Enter: activate",
+            10.0f, y + 6.0f, 0.6f, 160, 160, 160, *ctx.font, *ctx.glyph_textures);
+        end_2d();
+    }
+
     SDL_GL_SwapWindow(window);
     SDL_Delay(1);
 }

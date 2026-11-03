@@ -31,6 +31,14 @@ struct s_camera
     bool m_framed = false; // auto-fit once; F re-fits
 };
 
+// One selectable debug-menu row (label + current value). The platform layer
+// owns the action logic; the renderer only draws label/value.
+struct s_menu_item
+{
+    std::string label;
+    std::string value;
+};
+
 // All state required to render a viewer frame. Pointers are non-owning.
 struct s_draw_context
 {
@@ -39,6 +47,11 @@ struct s_draw_context
     int drawable_height = 0;
 
     const s_camera* camera = nullptr;
+
+    // Debug menu (F1 toggles). Filled by the platform layer each frame.
+    bool debug_open = false;
+    int debug_selected = 0;
+    std::vector<s_menu_item> debug_menu;
 
     // Model viewer.
     const sdbz::s_model* model = nullptr;

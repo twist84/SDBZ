@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -539,6 +540,8 @@ int main(int argc, char** argv)
 
     // ---- Viewer context + camera ----
     s_camera camera;
+    bool debug_open = false;
+    int debug_selected = 0;
     s_draw_context ctx;
     ctx.window = window;
     ctx.camera = &camera;
@@ -578,6 +581,8 @@ int main(int argc, char** argv)
     ctx.has_font = has_font;
     ctx.glyph_textures = &glyph_textures;
     ctx.input_path = input_path;
+    ctx.debug_open = debug_open;
+    ctx.debug_selected = debug_selected;
 
     // ---- Main loop ----
     bool running = true;
@@ -600,6 +605,38 @@ int main(int argc, char** argv)
             frame_time = 0.25;
         }
 
+        // Build the debug menu rows each frame (reflects current state).
+        ctx.debug_open = debug_open;
+        ctx.debug_selected = debug_selected;
+        ctx.debug_menu.clear();
+        if (debug_open)
+        {
+            if (has_loaded_stage)
+            {
+                ctx.debug_menu.push_back({ "Stage",
+                    loaded_stages[loaded_stage_index].m_names[0] });
+            }
+            if (has_loaded_motion)
+            {
+                ctx.debug_menu.push_back({ "Motion",
+                    loaded_motion.m_motions[motion_clip_index].m_name });
+            }
+            ctx.debug_menu.push_back({ "Show effect",
+                show_effect ? "on" : "off" });
+            ctx.debug_menu.push_back({ "Show collision",
+                show_collision ? "on" : "off" });
+            ctx.debug_menu.push_back({ "Show templates",
+                show_templates ? "on" : "off" });
+            ctx.debug_menu.push_back({ "Fit camera", "" });
+            ctx.debug_menu.push_back({ "Quit", "" });
+            if (debug_selected < 0 ||
+                debug_selected >= static_cast<int>(ctx.debug_menu.size()))
+            {
+                debug_selected = 0;
+                ctx.debug_selected = 0;
+            }
+        }
+
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
@@ -609,6 +646,84 @@ int main(int argc, char** argv)
                 running = false;
                 break;
             case SDL_EVENT_KEY_DOWN:
+                // F1 toggles the debug menu regardless of state.
+                if (event.key.key == SDLK_F1)
+                {
+                    debug_open = !debug_open;
+                    break;
+                }
+                if (debug_open)
+                {
+                    // Debug menu navigation.
+                    if (event.key.key == SDLK_UP)
+                    {
+                        const int count = static_cast<int>(ctx.debug_menu.size());
+                        debug_selected = (debug_selected + count - 1) % count;
+                    }
+                    else if (event.key.key == SDLK_DOWN)
+                    {
+                        const int count = static_cast<int>(ctx.debug_menu.size());
+                        debug_selected = (debug_selected + 1) % count;
+                    }
+                    else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE ||
+                        event.key.key == SDLK_LEFT || event.key.key == SDLK_RIGHT)
+                    {
+                        if (!ctx.debug_menu.empty())
+                        {
+                            const bool increment =
+                                (event.key.key == SDLK_RIGHT);
+                            // Activate the selected row. Order must match the menu build
+                            // below: stage, motion, effect, collision, templates, fit, quit.
+                            std::size_t row = 0;
+                            if (has_loaded_stage)
+                            {
+                                if (row == debug_selected)
+                                {
+                                    loaded_stage_index = increment
+                                        ? (loaded_stage_index + 1) % loaded_stages.size()
+                                        : (loaded_stage_index + loaded_stages.size() - 1) %
+                                            loaded_stages.size();
+                                    std::cout << "Stage: "
+                                        << loaded_stages[loaded_stage_index].m_names[0]
+                                        << '\n';
+                                }
+                                ++row;
+                            }
+                            if (has_loaded_motion)
+                            {
+                                if (row == debug_selected)
+                                {
+                                    motion_clip_index = increment
+                                        ? (motion_clip_index + 1) %
+                                            loaded_motion.m_motions.size()
+                                        : (motion_clip_index +
+                                            loaded_motion.m_motions.size() - 1) %
+                                            loaded_motion.m_motions.size();
+                                    animation_time = 0.0f;
+                                    std::cout << "Motion clip " << motion_clip_index << ": "
+                                        << loaded_motion.m_motions[motion_clip_index].m_name
+                                        << '\n';
+                                }
+                                ++row;
+                            }
+                            if (row == debug_selected) show_effect = !show_effect;
+                            ++row;
+                            if (row == debug_selected) show_collision = !show_collision;
+                            ++row;
+                            if (row == debug_selected) show_templates = !show_templates;
+                            ++row;
+                            if (row == debug_selected)
+                            {
+                                camera.m_framed = false;
+                                camera.m_yaw = 0.0f;
+                                camera.m_pitch = 0.0f;
+                            }
+                            ++row;
+                            if (row == debug_selected) running = false;
+                        }
+                    }
+                    break;
+                }
                 if (event.key.key == SDLK_ESCAPE)
                 {
                     running = false;
@@ -811,6 +926,9 @@ int main(int argc, char** argv)
         ctx.show_effect = show_effect;
         ctx.show_collision = show_collision;
         ctx.show_templates = show_templates;
+
+        ctx.debug_open = debug_open;
+        ctx.debug_selected = debug_selected;
 
         render_frame(ctx);
     }
