@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <SDL3/SDL_opengl.h>
@@ -15,7 +16,7 @@ void begin_2d(int width, int height);
 void end_2d();
 void draw_glyph(GLuint tex, float x, float y, float w, float h,
     std::uint8_t r, std::uint8_t g, std::uint8_t b);
-void draw_text(const std::string& text, float x, float y, float scale,
+void draw_text(std::string_view text, float x, float y, float scale,
     std::uint8_t r, std::uint8_t g, std::uint8_t b,
     const s_ffon_font& font, const std::vector<GLuint>& glyph_textures);
 void gl_mult_matrix(const sdbz::mat4& m);

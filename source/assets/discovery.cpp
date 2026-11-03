@@ -5,6 +5,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 std::string lower_copy(std::string text)
 {
@@ -13,7 +14,7 @@ std::string lower_copy(std::string text)
     return text;
 }
 
-bool has_extension(const fs::path& path, const char* extension)
+bool has_extension(const fs::path& path, std::string_view extension)
 {
     return lower_copy(path.extension().string()) == extension;
 }
@@ -24,7 +25,7 @@ fs::path directory_of(const fs::path& path)
     return parent.empty() ? fs::path(".") : parent;
 }
 
-std::vector<fs::path> list_files(const fs::path& dir, const char* extension)
+std::vector<fs::path> list_files(const fs::path& dir, std::string_view extension)
 {
     std::vector<fs::path> result;
     std::error_code ec;

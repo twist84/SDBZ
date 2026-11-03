@@ -10,8 +10,9 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
-#include <fstream>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -372,7 +373,7 @@ int main(int argc, char** argv)
                     for (std::size_t si = 0; si < loaded_stages.size(); ++si)
                     {
                         const auto& stg_path = stage_files[si];
-                        const auto sibling = [&](const char* extension) -> fs::path
+                        const auto sibling = [&](std::string_view extension) -> fs::path
                         {
                             const std::string stem =
                                 lower_copy(stg_path.stem().string());
@@ -1016,11 +1017,11 @@ int main(int argc, char** argv)
                                         // Find companion files in the archive by stem name.
                                         // Archive entries may carry path prefixes (e.g.
                                         // "stg/s00/s00a.mdl") so match by stem suffix.
-                                        auto find_archive_entry = [&](const char* extension)
+                                        auto find_archive_entry = [&](std::string_view extension)
                                             -> const sdbz::s_archive_entry*
                                         {
                                             const std::string target =
-                                                lower_copy(stage_stem + extension);
+                                                lower_copy(stage_stem + std::string(extension));
                                             for (const auto& candidate :
                                                 loaded_archive.m_entries)
                                             {

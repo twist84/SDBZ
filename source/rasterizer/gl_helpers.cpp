@@ -90,7 +90,7 @@ void draw_glyph(GLuint tex, float x, float y, float w, float h,
     c_rasterizer::disable(GL_TEXTURE_2D);
 }
 
-void draw_text(const std::string& text, float x, float y, float scale,
+void draw_text(std::string_view text, float x, float y, float scale,
     std::uint8_t r, std::uint8_t g, std::uint8_t b,
     const s_ffon_font& font, const std::vector<GLuint>& glyph_textures)
 {

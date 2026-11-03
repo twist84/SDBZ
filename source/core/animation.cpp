@@ -212,7 +212,7 @@ namespace sdbz
         }
     }
 
-    s_animation_clip parse_mot2(const std::span<const std::uint8_t> data, const std::string& name)
+    s_animation_clip parse_mot2(const std::span<const std::uint8_t> data, std::string_view name)
     {
         if (data.size() < 64 || fourcc_to_string(data.data()) != "MOT2")
         {

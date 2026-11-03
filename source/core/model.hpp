@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sdbz
@@ -68,6 +69,6 @@ namespace sdbz
         std::vector<s_model_mesh> m_meshes;
     };
 
-    [[nodiscard]] s_model parse_fmdl(std::span<const std::uint8_t> data, const std::string& name = {});
+    [[nodiscard]] s_model parse_fmdl(std::span<const std::uint8_t> data, std::string_view name = {});
     void write_model_obj(const std::filesystem::path& path, const s_model& model);
 }

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -123,7 +124,7 @@ void draw_glyph(GLuint tex, float x, float y, float w, float h,
     std::uint8_t r, std::uint8_t g, std::uint8_t b);
 
 // Draw ASCII text using FFON glyphs (pixel coordinates, origin top-left).
-void draw_text(const std::string& text, float x, float y, float scale,
+void draw_text(std::string_view text, float x, float y, float scale,
     std::uint8_t r, std::uint8_t g, std::uint8_t b,
     const s_ffon_font& font, const std::vector<GLuint>& glyph_textures);
 

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sdbz
@@ -55,5 +56,5 @@ namespace sdbz
 
     [[nodiscard]] std::vector<std::uint8_t> decode_info(std::span<const std::uint8_t> encoded_info);
     [[nodiscard]] std::vector<std::uint8_t> encode_info(std::span<const std::uint8_t> decoded_info);
-    [[nodiscard]] bool is_safe_asset_name(const std::string& name) noexcept;
+    [[nodiscard]] bool is_safe_asset_name(std::string_view name) noexcept;
 }

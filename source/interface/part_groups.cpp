@@ -4,13 +4,14 @@
 #include <cctype>
 #include <cstring>
 #include <string>
+#include <string_view>
 
-std::string part_base_name(const std::string& name)
+std::string part_base_name(std::string_view name)
 {
-    std::string base = name;
-    for (const char* prefix : { "Mesh", "Shape" })
+    std::string base{name.data(), name.size()};
+    for (std::string_view prefix : { "Mesh", "Shape" })
     {
-        const std::size_t len = std::strlen(prefix);
+        const std::size_t len = prefix.size();
         if (base.size() > len && base.compare(0, len, prefix) == 0)
         {
             base.erase(0, len);
@@ -28,7 +29,7 @@ std::string part_base_name(const std::string& name)
         const std::string suffix = base.substr(end);
         if (suffix != "L" && suffix != "R") base.erase(end);
     }
-    return base.empty() ? name : base;
+    return base.empty() ? std::string(name) : base;
 }
 
 void apply_part_visibility(const std::vector<s_part_group>& groups, std::vector<bool>& visible)

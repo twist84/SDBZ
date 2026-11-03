@@ -173,14 +173,14 @@ namespace sdbz
         return encoded;
     }
 
-    bool is_safe_asset_name(const std::string& name) noexcept
+    bool is_safe_asset_name(std::string_view name) noexcept
     {
         if (name.empty() || name.front() == '/' || name.front() == '\\' || name.find(':') != std::string::npos)
         {
             return false;
         }
 
-        std::string normalized = name;
+        std::string normalized{name.data(), name.size()};
         std::replace(normalized.begin(), normalized.end(), '\\', '/');
         std::size_t begin = 0;
         while (begin <= normalized.size())

@@ -734,7 +734,7 @@ namespace sdbz
         }
     }
 
-    s_model parse_fmdl(const std::span<const std::uint8_t> data, const std::string& name)
+    s_model parse_fmdl(const std::span<const std::uint8_t> data, std::string_view name)
     {
         const auto top_directory = parse_chunked_container(data, "FMDL");
         (void)top_directory;

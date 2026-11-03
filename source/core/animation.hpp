@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sdbz
@@ -45,7 +46,7 @@ namespace sdbz
 
     [[nodiscard]] s_animation_clip parse_mot2(
         std::span<const std::uint8_t> data,
-        const std::string& name = {});
+        std::string_view name = {});
 
     [[nodiscard]] s_motion_package parse_rfsm(std::span<const std::uint8_t> data);
 

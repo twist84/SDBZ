@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -44,11 +45,11 @@ struct s_ffon_font
 // ---- Asset discovery: given a model, find its texture, motions and the game font ----
 
 std::string lower_copy(std::string text);
-bool has_extension(const fs::path& path, const char* extension);
+bool has_extension(const fs::path& path, std::string_view extension);
 fs::path directory_of(const fs::path& path);
 
 // Regular files directly inside `dir` with the given (lowercase) extension, sorted by name.
-std::vector<fs::path> list_files(const fs::path& dir, const char* extension);
+std::vector<fs::path> list_files(const fs::path& dir, std::string_view extension);
 
 // "p01a" -> "p01": drop trailing variant letters that follow a digit.
 std::string character_prefix(const std::string& stem);

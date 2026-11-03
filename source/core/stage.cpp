@@ -6,29 +6,32 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace sdbz
 {
     namespace
     {
         [[nodiscard]] std::uint32_t get_u32(
-            const std::span<const std::uint8_t> data, const std::size_t offset, const char* description)
+            const std::span<const std::uint8_t> data, const std::size_t offset,
+            std::string_view description)
         {
             const auto value = read_u32_le(data, offset);
             if (!value)
             {
-                throw std::runtime_error(std::string("truncated ") + description);
+                throw std::runtime_error(std::string("truncated ") + std::string(description));
             }
             return *value;
         }
 
         [[nodiscard]] float get_f32(
-            const std::span<const std::uint8_t> data, const std::size_t offset, const char* description)
+            const std::span<const std::uint8_t> data, const std::size_t offset,
+            std::string_view description)
         {
             const auto value = read_f32_le(data, offset);
             if (!value || !std::isfinite(*value))
             {
-                throw std::runtime_error(std::string("invalid or non-finite ") + description);
+                throw std::runtime_error(std::string("invalid or non-finite ") + std::string(description));
             }
             return *value;
         }
@@ -53,7 +56,7 @@ namespace sdbz
             return std::string(reinterpret_cast<const char*>(data.data() + offset), length);
         }
 
-        [[nodiscard]] std::uint32_t checked_u32_size(const std::size_t value, const char* description)
+        [[nodiscard]] std::uint32_t checked_u32_size(const std::size_t value, std::string_view description)
         {
             if (value > (std::numeric_limits<std::uint32_t>::max)())
             {

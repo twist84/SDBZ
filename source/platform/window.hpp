@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 namespace sdbz
 {
@@ -15,13 +16,13 @@ public:
     c_window(const c_window&) = delete;
     c_window& operator=(const c_window&) = delete;
 
-    bool create(const char* title, int width, int height);
+    bool create(std::string_view title, int width, int height);
     void destroy();
 
     void get_size_pixels(int& width, int& height) const;
     void swap_buffers();
     void make_gl_current();
-    void set_title(const char* title);
+    void set_title(std::string_view title);
 
     bool valid() const;
 

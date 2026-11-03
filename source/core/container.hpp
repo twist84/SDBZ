@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace sdbz
@@ -28,5 +29,5 @@ namespace sdbz
 
     [[nodiscard]] s_chunked_container parse_chunked_container(
         std::span<const std::uint8_t> data,
-        const std::string& expected_magic = {});
+        std::string_view expected_magic = {});
 }

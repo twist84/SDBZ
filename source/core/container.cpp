@@ -15,7 +15,7 @@ namespace sdbz
 
     s_chunked_container parse_chunked_container(
         const std::span<const std::uint8_t> data,
-        const std::string& expected_magic)
+        std::string_view expected_magic)
     {
         if (data.size() < 32)
         {
@@ -27,7 +27,7 @@ namespace sdbz
         const std::string actual_magic(result.m_magic.begin(), result.m_magic.end());
         if (!expected_magic.empty() && actual_magic != expected_magic)
         {
-            throw std::runtime_error("expected " + expected_magic + " container, found " + actual_magic);
+            throw std::runtime_error(std::string("expected ") + std::string(expected_magic) + " container, found " + actual_magic);
         }
         if (expected_magic.empty() && actual_magic != "FPIX" && actual_magic != "FMDL")
         {

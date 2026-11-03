@@ -3,6 +3,9 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 
+#include <string>
+#include <string_view>
+
 struct c_window::impl
 {
     SDL_Window* window = nullptr;
@@ -21,12 +24,12 @@ c_window::~c_window()
     m_impl = nullptr;
 }
 
-bool c_window::create(const char* title, int width, int height)
+bool c_window::create(std::string_view title, int width, int height)
 {
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
-    m_impl->window = SDL_CreateWindow(title,
+    m_impl->window = SDL_CreateWindow(title.data(),
         width, height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (!m_impl->window)
     {
@@ -86,11 +89,11 @@ void c_window::make_gl_current()
     }
 }
 
-void c_window::set_title(const char* title)
+void c_window::set_title(std::string_view title)
 {
     if (m_impl->window)
     {
-        SDL_SetWindowTitle(m_impl->window, title);
+        SDL_SetWindowTitle(m_impl->window, std::string(title).c_str());
     }
 }
 
