@@ -11,6 +11,8 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <print>
+#include <iostream>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -21,7 +23,7 @@ namespace
 {
     void print_usage()
     {
-        std::cout <<
+        std::print(
             "Super Dragon Ball Z native tools\n"
             "\n"
             "Usage:\n"
@@ -36,7 +38,7 @@ namespace
             "  sdbz_tool hit <asset.hit>\n"
             "  sdbz_tool hit-obj <asset.hit> <output.obj>\n"
             "  sdbz_tool extract <INFO.DAT> <GAME.DAT> <output_dir> [--overwrite]\n"
-            "  sdbz_tool rebuild <INFO.DAT> <GAME.DAT> <replacement_dir|-> <output_dir>\n";
+            "  sdbz_tool rebuild <INFO.DAT> <GAME.DAT> <replacement_dir|-> <output_dir>\n");
     }
 
     [[nodiscard]] std::string printable_name(const std::string& value)
@@ -61,20 +63,25 @@ namespace
         const auto data = sdbz::read_file(path);
         const auto elf = sdbz::inspect_elf32(data);
 
-        std::cout << "File:                 " << path.string() << '\n'
-                  << "Size:                 " << data.size() << " bytes\n"
-                  << "Class:                ELF32\n"
-                  << "Data:                 little-endian\n"
-                  << "Type:                 " << (elf.m_type == 2 ? "executable" : std::to_string(elf.m_type)) << '\n'
-                  << "Machine:              " << sdbz::elf_machine_name(elf.m_machine) << '\n'
-                  << "Entry point:          0x" << std::hex << elf.m_entry << std::dec << '\n'
-                  << "ELF flags:            0x" << std::hex << elf.m_flags << std::dec << '\n'
-                  << "Program headers:      " << elf.m_program_header_count << '\n'
-                  << "Section headers:      " << elf.m_section_header_count << '\n';
+        std::print("File:                 {}\n"
+                   "Size:                 {} bytes\n"
+                   "Class:                ELF32\n"
+                   "Data:                 little-endian\n"
+                   "Type:                 {}\n"
+                   "Machine:              {}\n"
+                   "Entry point:          {:#x}\n"
+                   "ELF flags:            {:#x}\n"
+                   "Program headers:      {}\n"
+                   "Section headers:      {}\n",
+                   path.string(), data.size(),
+                   (elf.m_type == 2 ? "executable" : std::to_string(elf.m_type)),
+                   sdbz::elf_machine_name(elf.m_machine),
+                   elf.m_entry, elf.m_flags,
+                   elf.m_program_header_count, elf.m_section_header_count);
 
         if (elf.m_machine == 8 && (elf.m_flags & 0xF0000000u) == 0x20000000u)
         {
-            std::cout << "PS2 hint:             MIPS-III / R5900 flag family\n";
+            std::println("PS2 hint:             MIPS-III / R5900 flag family");
         }
         return 0;
     }
@@ -89,25 +96,22 @@ namespace
         }
         const auto archive = sdbz::s_archive::from_encoded_info(encoded, game_size);
 
-        std::cout << "Entries:              " << archive.m_entries.size() << '\n'
-                  << "Indexed bytes:        " << archive.m_used_bytes << '\n'
-                  << "INFO.DAT size:        " << archive.m_encoded_info.size() << '\n';
+        std::print("Entries:              {}\n"
+                   "Indexed bytes:        {}\n"
+                   "INFO.DAT size:        {}\n",
+                   archive.m_entries.size(), archive.m_used_bytes, archive.m_encoded_info.size());
+
         if (game_path)
         {
-            std::cout << "GAME.DAT size:        " << game_size << '\n';
+            std::print("GAME.DAT size:        {}\n", game_size);
         }
 
-        std::cout << "\n"
-                  << std::left << std::setw(7) << "Index"
-                  << std::setw(14) << "Sector"
-                  << std::setw(14) << "Size"
-                  << "Name\n";
+        std::print("\n{:<7}{:<14}{:<14}Name\n", "Index", "Sector", "Size");
         for (const auto& entry : archive.m_entries)
         {
-            std::cout << std::left << std::setw(7) << entry.m_index
-                      << std::setw(14) << entry.m_sector_offset
-                      << std::setw(14) << entry.m_byte_size
-                      << printable_name(entry.m_name_cp932) << '\n';
+            std::print("{:<7}{:<14}{:<14}{}\n",
+                       entry.m_index, entry.m_sector_offset, entry.m_byte_size,
+                       printable_name(entry.m_name_cp932));
         }
         return 0;
     }
@@ -116,18 +120,18 @@ namespace
     {
         const auto data = sdbz::read_file(path);
         const auto container = sdbz::parse_chunked_container(data);
-        std::cout << "Container:            " << std::string(container.m_magic.begin(), container.m_magic.end()) << '\n'
-                  << "File size:            " << container.m_file_size << '\n'
-                  << "Chunk count:          " << container.m_chunk_count << '\n'
-                  << "Format:               0x" << std::hex << container.m_format << std::dec << '\n';
+        std::print("Container:            {}\n"
+                   "File size:            {}\n"
+                   "Chunk count:          {}\n"
+                   "Format:               {:#x}\n",
+                   std::string(container.m_magic.begin(), container.m_magic.end()),
+                   container.m_file_size, container.m_chunk_count, container.m_format);
 
         for (std::size_t index = 0; index < container.m_chunks.size(); ++index)
         {
             const auto& chunk = container.m_chunks[index];
-            std::cout << "  [" << std::setw(4) << std::setfill('0') << index << "] "
-                      << chunk.magic_string()
-                      << " offset=0x" << std::hex << chunk.m_offset
-                      << " size=0x" << chunk.m_size << std::dec << std::setfill(' ') << '\n';
+            std::print("  [{:0>4}] {} offset={:#x} size={:#x}\n",
+                       index, chunk.magic_string(), chunk.m_offset, chunk.m_size);
         }
         return 0;
     }
@@ -137,7 +141,8 @@ namespace
         const auto data = sdbz::read_file(input_path);
         const auto image = sdbz::decode_first_fpix_texture(data);
         sdbz::write_bmp_rgba(output_path, image);
-        std::cout << "Decoded " << image.width << 'x' << image.height << " texture to " << output_path.string() << '\n';
+        std::print("Decoded {}x{} texture to {}\n",
+           image.width, image.height, output_path.string());
         return 0;
     }
 
@@ -167,22 +172,19 @@ namespace
             }
         }
 
-        std::cout << "Model:                " << model.m_name << '\n'
-                  << "File size:            " << data.size() << " bytes\n"
-                  << "Hierarchy nodes:      " << model.m_nodes.size() << '\n'
-                  << "Materials:            " << model.m_materials.size() << '\n'
-                  << "Meshes:               " << model.m_meshes.size() << '\n'
-                  << "Vertices:             " << total_vertices << '\n'
-                  << "Triangles:            " << total_triangles << '\n'
-                  << "Skinned meshes:       " << skinned_meshes << '\n'
-                  << "Morph meshes:         " << morph_meshes << '\n';
+        std::print("Model:                {}\n"
+           "File size:            {} bytes\n"
+           "Hierarchy nodes:      {}\n"
+           "Materials:            {}\n"
+           "Meshes:               {}\n"
+           "Vertices:             {}\n"
+           "Triangles:            {}\n"
+           "Skinned meshes:       {}\n"
+           "Morph meshes:         {}\n",
+           model.m_name, data.size(), model.m_nodes.size(), model.m_materials.size(),
+           model.m_meshes.size(), total_vertices, total_triangles, skinned_meshes, morph_meshes);
 
-        std::cout << "\nMeshes\n"
-                  << std::left << std::setw(5) << "#"
-                  << std::setw(28) << "Name"
-                  << std::setw(12) << "Vertices"
-                  << std::setw(12) << "Triangles"
-                  << "Flags\n";
+        std::print("\nMeshes\n{:<5}{:<28}{:<12}{:<12}Flags\n", "#", "Name", "Vertices", "Triangles");
         for (std::size_t index = 0; index < model.m_meshes.size(); ++index)
         {
             const auto& mesh = model.m_meshes[index];
@@ -191,20 +193,17 @@ namespace
             {
                 triangles += primitive.m_indices.size() / 3;
             }
-            std::cout << std::left << std::setw(5) << index
-                      << std::setw(28) << printable_name(mesh.m_name)
-                      << std::setw(12) << mesh.m_vertices.size()
-                      << std::setw(12) << triangles
-                      << "0x" << std::hex << mesh.m_vertex_flags << std::dec;
+            std::print("{:<5}{:<28}{:<12}{:<12}0x{:x}",
+                       index, printable_name(mesh.m_name), mesh.m_vertices.size(), triangles, mesh.m_vertex_flags);
             if (mesh.m_is_skinned)
             {
-                std::cout << " skinned";
+                std::print(" skinned");
             }
             if (mesh.m_has_morph)
             {
-                std::cout << " morph";
+                std::print(" morph");
             }
-            std::cout << '\n';
+            std::println("");
         }
 
         return 0;
@@ -221,8 +220,8 @@ namespace
         const auto archive = sdbz::s_archive::from_encoded_info(encoded, game_size);
         const auto replacement_root = replacement_path == "-" ? std::filesystem::path{} : replacement_path;
         archive.rebuild(info_path, game_path, replacement_root, output_path);
-        std::cout << "Rebuilt archive with " << archive.m_entries.size() << " indexed assets in "
-                  << output_path.string() << '\n';
+        std::print("Rebuilt archive with {} indexed assets in {}\n",
+           archive.m_entries.size(), output_path.string());
         return 0;
     }
 
@@ -235,14 +234,10 @@ namespace
             animated_nodes[1] += node.m_rotation.m_is_animated ? 1u : 0u;
             animated_nodes[2] += node.m_scale.m_is_animated ? 1u : 0u;
         }
-        std::cout << "  [" << std::setw(3) << index << "] " << printable_name(clip.m_name)
-                  << " frames=" << clip.m_frame_count
-                  << " fps=" << clip.m_frames_per_second
-                  << " nodes=" << clip.m_nodes.size()
-                  << " channels(T/R/S)=" << clip.m_channel_counts[0] << '/'
-                  << clip.m_channel_counts[1] << '/' << clip.m_channel_counts[2]
-                  << " animated-nodes=" << animated_nodes[0] << '/'
-                  << animated_nodes[1] << '/' << animated_nodes[2] << '\n';
+        std::print("  [{:>3}] {} frames={} fps={} nodes={} channels(T/R/S)={}/{}/{} animated-nodes={}/{}/{}\n",
+           index, printable_name(clip.m_name), clip.m_frame_count, clip.m_frames_per_second,
+           clip.m_nodes.size(), clip.m_channel_counts[0], clip.m_channel_counts[1], clip.m_channel_counts[2],
+           animated_nodes[0], animated_nodes[1], animated_nodes[2]);
     }
 
     int command_motion(const std::filesystem::path& path)
@@ -256,21 +251,22 @@ namespace
         if (magic == "MOT2")
         {
             const auto clip = sdbz::parse_mot2(data, path.stem().string());
-            std::cout << "MOT2: " << printable_name(clip.m_name) << '\n'
-                      << "FPS:                  " << clip.m_frames_per_second << '\n'
-                      << "Frame count:          " << clip.m_frame_count << '\n'
-                      << "Duration:             " << clip.m_duration << " seconds\n"
-                      << "Last frame time:      " << clip.m_last_frame_time << " seconds\n"
-                      << "Nodes:                " << clip.m_nodes.size() << '\n'
-                      << "Channels T/R/S:       " << clip.m_channel_counts[0] << '/'
-                      << clip.m_channel_counts[1] << '/' << clip.m_channel_counts[2] << '\n';
+            std::print("MOT2: {}\nFPS:                  {}\nFrame count:          {}\n"
+               "Duration:             {} seconds\n"
+               "Last frame time:      {} seconds\n"
+               "Nodes:                {}\n"
+               "Channels T/R/S:       {}/{}/{}\n",
+               printable_name(clip.m_name), clip.m_frames_per_second,
+               clip.m_frame_count, clip.m_duration, clip.m_last_frame_time,
+               clip.m_nodes.size(), clip.m_channel_counts[0], clip.m_channel_counts[1], clip.m_channel_counts[2]);
             return 0;
         }
 
         const auto package = sdbz::parse_rfsm(data);
-        std::cout << "RFSM/L3 motion package\n"
-                  << "Bone names:           " << package.m_bone_names.size() << '\n'
-                  << "Motions:              " << package.m_motions.size() << '\n';
+        std::print("RFSM/L3 motion package\n"
+                   "Bone names:           {}\n"
+                   "Motions:              {}\n",
+                   package.m_bone_names.size(), package.m_motions.size());
         for (std::size_t index = 0; index < package.m_motions.size(); ++index)
         {
             print_motion_clip(package.m_motions[index], index);
@@ -290,28 +286,33 @@ namespace
             ++kind_counts[node.m_kind];
             reference_count += node.m_references.size();
         }
-        std::cout << "STG scene\n"
-                  << "Version:              0x" << std::hex << stage.m_version << std::dec << '\n'
-                  << "Names:                " << stage.m_names.size() << '\n'
-                  << "Template roots:       " << stage.m_template_root_count << '\n'
-                  << "Root nodes:           " << stage.m_roots.size() << '\n'
-                  << "Nodes:                " << stage.m_nodes.size() << '\n'
-                  << "Inline references:    " << reference_count << '\n'
-                  << "EFFECT root:          " << stage.m_effect_root << '\n'
-                  << "STAGE root:           " << stage.m_stage_root << '\n'
-                  << "Node kinds 1..6:      ";
+        std::print("STG scene\n"
+           "Version:              {:#x}\n"
+           "Names:                {}\n"
+           "Template roots:       {}\n"
+           "Root nodes:           {}\n"
+           "Nodes:                {}\n"
+           "Inline references:    {}\n"
+           "EFFECT root:          {}\n"
+           "STAGE root:           {}\n"
+           "Node kinds 1..6:      ",
+           stage.m_version, stage.m_names.size(), stage.m_template_root_count,
+           stage.m_roots.size(), stage.m_nodes.size(), reference_count,
+           stage.m_effect_root, stage.m_stage_root);
+
         for (std::size_t kind = 1; kind < kind_counts.size(); ++kind)
         {
-            std::cout << (kind == 1 ? "" : "/") << kind_counts[kind];
+            if (kind > 1) std::print("/");
+            std::print("{}", kind_counts[kind]);
         }
-        std::cout << '\n';
+        std::print("\n");
+
         for (const auto& node : stage.m_nodes)
         {
-            std::cout << "  [" << std::setw(4) << node.m_index << "] kind=" << static_cast<unsigned int>(node.m_kind)
-                      << " parent=" << node.m_parent << " links=0x" << std::hex
-                      << static_cast<unsigned int>(node.m_links) << " flags=0x"
-                      << static_cast<unsigned int>(node.m_flags) << std::dec
-                      << " name=" << printable_name(node.m_name) << '\n';
+            std::print("  [{:>4}] kind={} parent={} links=0x{:x} flags=0x{:x} name={}\n",
+                       node.m_index, static_cast<unsigned int>(node.m_kind),
+                       node.m_parent, static_cast<unsigned int>(node.m_links),
+                       static_cast<unsigned int>(node.m_flags), printable_name(node.m_name));
         }
         return 0;
     }
@@ -325,18 +326,17 @@ namespace
         {
             polygons += object.m_polygon_count;
         }
-        std::cout << "HIT collision resource\n"
-                  << "Objects:              " << hit.m_objects.size() << '\n'
-                  << "Polygons:             " << hit.m_polygons.size() << '\n'
-                  << "Vertices:             " << hit.m_vertices.size() << '\n'
-                  << "Object polygon refs:  " << polygons << '\n';
+        std::print("HIT collision resource\n"
+                   "Objects:              {}\n"
+                   "Polygons:             {}\n"
+                   "Vertices:             {}\n"
+                   "Object polygon refs:  {}\n",
+                   hit.m_objects.size(), hit.m_polygons.size(), hit.m_vertices.size(), polygons);
         for (const auto& object : hit.m_objects)
         {
-            std::cout << "  " << printable_name(object.m_name)
-                      << " flags=0x" << std::hex << object.m_flags << std::dec
-                      << " polygons=" << object.m_polygon_count
-                      << " first=" << object.m_first_polygon
-                      << " radius=" << object.m_radius << '\n';
+            std::print("  {} flags=0x{:x} polygons={} first={} radius={}\n",
+                       printable_name(object.m_name), object.m_flags,
+                       object.m_polygon_count, object.m_first_polygon, object.m_radius);
         }
         return 0;
     }
@@ -346,8 +346,8 @@ namespace
         const auto data = sdbz::read_file(input_path);
         const auto hit = sdbz::parse_hit(data);
         sdbz::write_hit_obj(output_path, hit);
-        std::cout << "Exported " << hit.m_objects.size() << " HIT objects and " << hit.m_polygons.size()
-                  << " polygons to " << output_path.string() << " (resource-local coordinates)\n";
+        std::print("Exported {} HIT objects and {} polygons to {} (resource-local coordinates)\n",
+           hit.m_objects.size(), hit.m_polygons.size(), output_path.string());
         return 0;
     }
 
@@ -358,8 +358,8 @@ namespace
         const auto data = sdbz::read_file(input_path);
         const auto model = sdbz::parse_fmdl(data, input_path.stem().string());
         sdbz::write_model_obj(output_path, model);
-        std::cout << "Exported " << model.m_meshes.size() << " meshes from " << input_path.string()
-                  << " to " << output_path.string() << " (static bind pose)\n";
+        std::print("Exported {} meshes from {} to {} (static bind pose)\n",
+           model.m_meshes.size(), input_path.string(), output_path.string());
         return 0;
     }
 
@@ -373,7 +373,7 @@ namespace
         const auto game_size = std::filesystem::file_size(game_path);
         const auto archive = sdbz::s_archive::from_encoded_info(encoded, game_size);
         const auto count = archive.extract_all(game_path, output_path, overwrite);
-        std::cout << "Extracted " << count << " assets to " << output_path.string() << '\n';
+        std::print("Extracted {} assets to {}\n", count, output_path.string());
         return 0;
     }
 }
@@ -449,7 +449,7 @@ int main(const int argc, char** argv)
     }
     catch (const std::exception& exception)
     {
-        std::cerr << "error: " << exception.what() << '\n';
+        std::println(std::cerr, "error: {}", exception.what());
         return 2;
     }
 }

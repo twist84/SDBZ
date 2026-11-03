@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <print>
 #include <iostream>
 #include <iterator>
 #include <stdexcept>
@@ -28,6 +29,20 @@
 namespace
 {
     int g_failures = 0;
+
+    // Locate repo-level test assets regardless of the working directory
+    // (tests may be launched from repo root or from the build directory).
+    std::filesystem::path test_asset_path(std::string_view relative)
+    {
+        std::filesystem::path p = relative;
+        if (std::filesystem::exists(p))
+        {
+            return p;
+        }
+        const auto here = std::filesystem::path(__FILE__).parent_path();
+        p = here.parent_path() / relative;  // tests/.. -> repo root
+        return p;
+    }
 
     void require(const bool condition, const std::string& message)
     {
@@ -706,60 +721,52 @@ namespace
 
 int main()
 {
-    std::cout << "info_codec" << std::endl; test_info_codec();
-    std::cout << "test_info_table();" << std::endl; test_info_table();
-    std::cout << "archive" << std::endl; test_archive_rebuild();
+    std::println("info_codec"); test_info_codec();
+    std::println("test_info_table();"); test_info_table();
+    std::println("archive"); test_archive_rebuild();
     // EBZ test
     {
-        const auto data = sdbz::read_file("assets/extracted/eff/e00/e00003.ebz");
+        const auto data = sdbz::read_file(test_asset_path("assets/extracted/eff/e00/e00003.ebz"));
         const auto ebz = sdbz::parse_ebz(data);
         require(ebz.m_version == 1, "EBZ version");
         require(ebz.m_count > 0, "EBZ has entries");
         require(!ebz.m_refs.empty(), "EBZ has refs");
-        std::cout << "EBZ: version=" << ebz.m_version << " type=" << ebz.m_type
-            << " count=" << ebz.m_count << " refs=" << ebz.m_refs.size()
-            << " entries=" << ebz.m_entries.size() << '\n';
+        std::println("EBZ: version={} type={} count={} refs={} entries={}", ebz.m_version, ebz.m_type, ebz.m_count, ebz.m_refs.size(), ebz.m_entries.size());
     }
     // ASE test
     {
-        const auto data = sdbz::read_file("assets/extracted/ply/p01/p01.ase");
+        const auto data = sdbz::read_file(test_asset_path("assets/extracted/ply/p01/p01.ase"));
         const auto ase = sdbz::parse_ase(data);
         require(ase.m_version == 100, "ASE version");
         require(!ase.m_samples.empty(), "ASE has samples");
-        std::cout << "ASE: version=" << ase.m_version
-            << " samples=" << ase.m_samples.size() << '\n';
+        std::println("ASE: version={} samples={}", ase.m_version, ase.m_samples.size());
     }
     // AMS test
     {
-        const auto data = sdbz::read_file("assets/extracted/sqm/menu_lp.ams");
+        const auto data = sdbz::read_file(test_asset_path("assets/extracted/sqm/menu_lp.ams"));
         const auto ams = sdbz::parse_ams(data);
         require(ams.m_version == 120, "AMS version");
         require(!ams.m_left_samples.empty(), "AMS has left samples");
         require(!ams.m_right_samples.empty(), "AMS has right samples");
-        std::cout << "AMS: version=" << ams.m_version
-            << " pitch=" << ams.m_pitch
-            << " units=" << ams.m_unit_count
-            << " samples=" << ams.m_left_samples.size() << '\n';
+        std::println("AMS: version={} pitch={} units={} samples={}", ams.m_version, ams.m_pitch, ams.m_unit_count, ams.m_left_samples.size());
     }
     // FON test
     {
-        const auto data = sdbz::read_file("assets/extracted/font/5-24-2.fon");
+        const auto data = sdbz::read_file(test_asset_path("assets/extracted/font/5-24-2.fon"));
         const auto fon = sdbz::parse_fon(data);
         require(fon.m_glyph_count == 1154, "FON glyph count");
         require(fon.m_char_map.size() == 3840, "FON char map");
-        std::cout << "FON: glyphs=" << fon.m_glyph_count
-            << " map=" << fon.m_char_map.size() << '\n';
+        std::println("FON: glyphs={} map={}", fon.m_glyph_count, fon.m_char_map.size());
     }
     // CHT test
     {
         try
         {
-            const auto data = sdbz::read_file("assets/extracted/ply/p01/p01act.cht");
+            const auto data = sdbz::read_file(test_asset_path("assets/extracted/ply/p01/p01act.cht"));
             const auto cht = sdbz::parse_cht(data);
             require(!cht.m_names.empty(), "CHT names");
             require(!cht.m_actions.empty(), "CHT actions");
-            std::cout << "CHT: names=" << cht.m_names.size()
-                << " actions=" << cht.m_actions.size() << '\n';
+            std::println("CHT: names={} actions={}", cht.m_names.size(), cht.m_actions.size());
         }
         catch (const std::exception& e)
         {
@@ -769,10 +776,10 @@ int main()
     }
     // SPT test
     {
-        const auto data = sdbz::read_file("assets/extracted/spt/stage_test.spt");
+        const auto data = sdbz::read_file(test_asset_path("assets/extracted/spt/stage_test.spt"));
         const auto spt = sdbz::parse_spt(data);
         require(!spt.m_programs.empty(), "SPT programs");
-        std::cout << "SPT: programs=" << spt.m_programs.size() << '\n';
+        std::println("SPT: programs={}", spt.m_programs.size());
     }
     //ref
     //cont
@@ -789,7 +796,7 @@ int main()
         return 1;
     }
 
-    std::cout << "All native core tests passed\n";
+    std::println("All native core tests passed");
     return 0;
 }
 

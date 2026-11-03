@@ -1,6 +1,7 @@
 #include "assets/assets.hpp"
 
 #include <iostream>
+#include <print>
 #include <span>
 #include <string_view>
 
@@ -38,12 +39,12 @@ std::vector<GLuint> load_fpix_textures(const std::vector<std::uint8_t>& data)
         {
             const auto image = sdbz::decode_xpix(chunk_data);
             textures.push_back(upload_texture(image));
-            std::cout << "Loaded texture " << textures.size() << " from XPIX chunk "
-                << chunk.m_offset << " (" << image.width << "x" << image.height << ")\n";
+std::println("Loaded texture {} from XPIX chunk {} ({}x{})",
+                textures.size(), chunk.m_offset, image.width, image.height);
         }
         catch (const std::exception& exception)
         {
-            std::cerr << "XPIX decode failed: " << exception.what() << '\n';
+            std::println(std::cerr, "XPIX decode failed: {}", exception.what());
         }
     }
     return textures;

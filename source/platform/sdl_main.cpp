@@ -10,14 +10,14 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <limits>
+#include <print>
 #include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <limits>
-#include <span>
 
 #include "assets/assets.hpp"
 #include "core/animation.hpp"
@@ -63,12 +63,10 @@ int main(int argc, char** argv)
             game_path = args[++i];
             continue;
         }
-        // First non-flag argument is the input model/path.
-        if (input_path == "assets/extracted")
+        else
         {
             input_path = arg;
-            std::cout << "Input: " << input_path.string() << '\n';
-            continue;
+            std::println("Input: {}", input_path.string());
         }
         const fs::path path = arg;
         if (has_extension(path, ".pmt") || has_extension(path, ".mot"))
@@ -76,13 +74,15 @@ int main(int argc, char** argv)
             motion_paths.push_back(path);
             explicit_motion = true;
         }
-        else if (has_extension(path, ".pix")) texture_path = path;
-        else if (has_extension(path, ".fon")) font_path = path;
-        else std::cerr << "Ignoring unrecognised argument: " << arg << '\n';
+        else if (has_extension(path, ".pix"))
+            texture_path = path;
+        else if (has_extension(path, ".fon"))
+            font_path = path;
+        std::println(std::cerr, "Ignoring unrecognised argument: {}", arg);
     }
     if (input_path == "assets/extracted")
     {
-        std::cout << "Input: " << input_path.string() << '\n';
+        std::println("Input: {}", input_path.string());
     }
     // Archive state (INFO.DAT / GAME.DAT).
     sdbz::s_archive loaded_archive;
@@ -90,8 +90,8 @@ int main(int argc, char** argv)
     std::vector<std::uint8_t> game_data;
     bool has_game_data = false;
     // Auto-detect INFO.DAT/GAME.DAT next to the input path if not explicitly provided.
-    if (!has_loaded_archive && !info_path.empty() && !game_path.empty() &&
-        fs::is_regular_file(info_path) && fs::is_regular_file(game_path))
+    if (!has_loaded_archive && !info_path.empty() && !game_path.empty() && fs::is_regular_file(info_path) &&
+        fs::is_regular_file(game_path))
     {
         try
         {
@@ -100,13 +100,12 @@ int main(int argc, char** argv)
             has_loaded_archive = true;
             game_data = sdbz::read_file(game_path);
             has_game_data = true;
-    std::cout << "Loaded archive: " << info_path.filename().string()
-        << " (" << loaded_archive.m_entries.size() << " entries) + "
-        << game_path.filename().string() << " (" << game_data.size() << " bytes)\n";
+            std::println("Loaded archive: {} ({} entries) + {} ({} bytes)", info_path.filename().string(),
+                         loaded_archive.m_entries.size(), game_path.filename().string(), game_data.size());
         }
         catch (const std::exception& exception)
         {
-            std::cerr << "Archive load unavailable: " << exception.what() << '\n';
+            std::println(std::cerr, "Archive load unavailable: {}", exception.what());
             has_loaded_archive = false;
             has_game_data = false;
         }
@@ -114,9 +113,7 @@ int main(int argc, char** argv)
 
     if (!has_loaded_archive)
     {
-        const fs::path input_dir = fs::is_regular_file(input_path)
-            ? input_path.parent_path()
-            : input_path;
+        const fs::path input_dir = fs::is_regular_file(input_path) ? input_path.parent_path() : input_path;
         const auto auto_info = input_dir / "INFO.DAT";
         const auto auto_game = input_dir / "GAME.DAT";
         if (fs::is_regular_file(auto_info) && fs::is_regular_file(auto_game))
@@ -128,9 +125,8 @@ int main(int argc, char** argv)
                 has_loaded_archive = true;
                 game_data = sdbz::read_file(auto_game);
                 has_game_data = true;
-                std::cout << "Auto-loaded archive: " << auto_info.filename().string()
-                    << " (" << loaded_archive.m_entries.size() << " entries) + "
-                    << auto_game.filename().string() << " (" << game_data.size() << " bytes)\n";
+                std::println("Auto-loaded archive: {} ({} entries) + {} ({} bytes)", auto_info.filename().string(),
+                             loaded_archive.m_entries.size(), auto_game.filename().string(), game_data.size());
             }
             catch (const std::exception& exception)
             {
@@ -168,14 +164,16 @@ int main(int argc, char** argv)
                     has_loaded_archive = true;
                     game_data = sdbz::read_file(fallback_game);
                     has_game_data = true;
-                    std::cout << "Loaded archive fallback: " << fallback_info.string()
-                        << " (" << loaded_archive.m_entries.size() << " entries) + "
-                        << fallback_game.string() << " (" << game_data.size() << " bytes)\n";
-                    break;
+                    {
+                        std::println("Loaded archive fallback: {} ({}) entries) + {} ({} bytes)",
+                                     fallback_info.string(), loaded_archive.m_entries.size(), fallback_game.string(),
+                                     game_data.size());
+                        break;
+                    }
                 }
                 catch (const std::exception& exception)
                 {
-                    std::cerr << "Archive auto-load fallback unavailable: " << exception.what() << '\n';
+                    std::println(std::cerr, "Archive auto-load fallback unavailable: {}", exception.what());
                     has_loaded_archive = false;
                     has_game_data = false;
                 }
@@ -233,8 +231,6 @@ int main(int argc, char** argv)
     bool has_archive_font = false;
     std::vector<GLuint> glyph_textures;
 
-
-
     // ---- Asset discovery + parsing from disk (no GL context required) ----
     if (argc > 1 && fs::is_regular_file(input_path))
     {
@@ -247,8 +243,7 @@ int main(int argc, char** argv)
                 const auto file_data = sdbz::read_file(input_path);
                 loaded_image = sdbz::decode_first_fpix_texture(file_data);
                 has_loaded_image = true;
-                std::cout << "Loaded texture: " << loaded_image.width << "x"
-                    << loaded_image.height << '\n';
+                std::print("Loaded texture: {}x{}", loaded_image.width, loaded_image.height);
             }
             catch (const std::exception& exception)
             {
@@ -264,10 +259,9 @@ int main(int argc, char** argv)
                 const auto file_data = sdbz::read_file(input_path);
                 loaded_model = sdbz::parse_fmdl(file_data, input_path.stem().string());
                 has_loaded_model = true;
-                std::cout << "Loaded model: " << loaded_model.m_name
-                    << " (meshes=" << loaded_model.m_meshes.size()
-                    << " materials=" << loaded_model.m_materials.size()
-                    << " nodes=" << loaded_model.m_nodes.size() << ")\n";
+                std::println("Loaded model: {} (meshes={}, materials={}, nodes={})", loaded_model.m_name,
+                             loaded_model.m_meshes.size(), loaded_model.m_materials.size(),
+                             loaded_model.m_nodes.size());
                 // Group meshes into parts (head, hair, hands...) and show the first variant of each.
                 mesh_visible.assign(loaded_model.m_meshes.size(), false);
                 for (std::size_t mi = 0; mi < loaded_model.m_meshes.size(); ++mi)
@@ -278,16 +272,21 @@ int main(int argc, char** argv)
                         bool matches = false;
                         for (const auto& f : mesh_filters)
                         {
-                            if (mesh_name.find(f) != std::string::npos) { matches = true; break; }
+                            if (mesh_name.find(f) != std::string::npos)
+                            {
+                                matches = true;
+                                break;
+                            }
                         }
-                        if (!matches) continue;
+                        if (!matches)
+                            continue;
                     }
                     const std::string label = part_base_name(mesh_name);
                     auto it = std::find_if(part_groups.begin(), part_groups.end(),
-                        [&](const s_part_group& g) { return g.m_label == label; });
+                                           [&](const s_part_group& g) { return g.m_label == label; });
                     if (it == part_groups.end())
                     {
-                        part_groups.push_back({ label, {}, 0 });
+                        part_groups.push_back({label, {}, 0});
                         it = part_groups.end() - 1;
                     }
                     it->m_meshes.push_back(mi);
@@ -295,14 +294,21 @@ int main(int argc, char** argv)
                 apply_part_visibility(part_groups, mesh_visible);
                 for (std::size_t gi = 0; gi < part_groups.size(); ++gi)
                 {
-                    std::cout << (gi < 9 ? std::to_string(gi + 1) : std::string("-")) << ": "
-                        << part_groups[gi].m_label << " (";
+                    std::println("{}: {} ({} meshes)", (gi < 9 ? std::to_string(gi + 1) : std::string("-")),
+                                 part_groups[gi].m_label, part_groups[gi].m_meshes.size());
                     for (std::size_t vi = 0; vi < part_groups[gi].m_meshes.size(); ++vi)
                     {
-                        std::cout << (vi ? ", " : "")
-                            << loaded_model.m_meshes[part_groups[gi].m_meshes[vi]].m_name;
+                        if (vi == 0)
+                        {
+                            std::print("{}", loaded_model.m_meshes[part_groups[gi].m_meshes[vi]].m_name);
+                            std::print(" (");
+                        }
+                        else
+                        {
+                            std::print(", {}", loaded_model.m_meshes[part_groups[gi].m_meshes[vi]].m_name);
+                        }
                     }
-                    std::cout << ")\n";
+                    std::println(")");
                 }
             }
             catch (const std::exception& exception)
@@ -319,9 +325,8 @@ int main(int argc, char** argv)
                 const auto file_data = sdbz::read_file(input_path);
                 loaded_hit = sdbz::parse_hit(file_data);
                 has_loaded_hit = true;
-                std::cout << "Loaded hit: " << loaded_hit.m_objects.size() << " objects, "
-                    << loaded_hit.m_polygons.size() << " polys, "
-                    << loaded_hit.m_vertices.size() << " verts\n";
+                std::println("Loaded hit: {} objects, {} polys, {} verts", loaded_hit.m_objects.size(),
+                             loaded_hit.m_polygons.size(), loaded_hit.m_vertices.size());
             }
             catch (const std::exception& exception)
             {
@@ -335,8 +340,7 @@ int main(int argc, char** argv)
             try
             {
                 // Load ALL .stg files in the same folder (e.g. s03a.stg, s03b.stg).
-                std::vector<fs::path> stage_files = list_files(
-                    directory_of(input_path), ".stg");
+                std::vector<fs::path> stage_files = list_files(directory_of(input_path), ".stg");
                 std::sort(stage_files.begin(), stage_files.end());
                 for (const auto& stg_path : stage_files)
                 {
@@ -356,13 +360,13 @@ int main(int argc, char** argv)
                         stage_meshes_by_names.emplace_back();
                         stage_hit_by_names.emplace_back();
                         stage_mesh_lists.emplace_back();
-                        std::cout << "Loaded stage: " << stg_path.filename().string()
-                            << " (" << loaded_stages.back().m_nodes.size() << " nodes)\n";
+                        std::println("Loaded stage: {} ({} nodes)", stg_path.filename().string(),
+                                     loaded_stages.back().m_nodes.size());
                     }
                     catch (const std::exception& exception)
                     {
-                        std::cerr << "Stage load failed for " << stg_path.filename().string()
-                            << ": " << exception.what() << '\n';
+                        std::cerr << "Stage load failed for " << stg_path.filename().string() << ": "
+                                  << exception.what() << '\n';
                     }
                 }
                 if (!loaded_stages.empty())
@@ -375,10 +379,8 @@ int main(int argc, char** argv)
                         const auto& stg_path = stage_files[si];
                         const auto sibling = [&](std::string_view extension) -> fs::path
                         {
-                            const std::string stem =
-                                lower_copy(stg_path.stem().string());
-                            for (const auto& candidate :
-                                list_files(directory_of(stg_path), extension))
+                            const std::string stem = lower_copy(stg_path.stem().string());
+                            for (const auto& candidate : list_files(directory_of(stg_path), extension))
                             {
                                 if (lower_copy(candidate.stem().string()) == stem)
                                     return candidate;
@@ -391,16 +393,15 @@ int main(int argc, char** argv)
                         {
                             try
                             {
-                                stage_models[si] = sdbz::parse_fmdl(
-                                    sdbz::read_file(model_file), model_file.stem().string());
+                                stage_models[si] =
+                                    sdbz::parse_fmdl(sdbz::read_file(model_file), model_file.stem().string());
                                 stage_models_loaded[si] = true;
                                 has_stage_model = true;
-                                std::cout << "Stage model " << model_file.filename().string()
-                                    << ": " << stage_models[si].m_meshes.size() << " meshes\n";
+                                std::println("Stage model {}: {} meshes", model_file.filename().string(),
+                                             stage_models[si].m_meshes.size());
                                 for (std::size_t mi = 0; mi < stage_models[si].m_meshes.size(); ++mi)
                                 {
-                                    stage_meshes_by_names[si][
-                                        stage_models[si].m_meshes[mi].m_name].push_back(mi);
+                                    stage_meshes_by_names[si][stage_models[si].m_meshes[mi].m_name].push_back(mi);
                                 }
                             }
                             catch (const std::exception& exception)
@@ -411,7 +412,7 @@ int main(int argc, char** argv)
                         else
                         {
                             std::cerr << "No " << stg_path.stem().string()
-                                << ".mdl next to the stage; showing the node hierarchy only\n";
+                                      << ".mdl next to the stage; showing the node hierarchy only\n";
                         }
                         // Collision (.hit).
                         const fs::path hit_file = sibling(".hit");
@@ -424,11 +425,10 @@ int main(int argc, char** argv)
                                 has_stage_hit = true;
                                 for (std::size_t oi = 0; oi < stage_hits[si].m_objects.size(); ++oi)
                                 {
-                                    stage_hit_by_names[si][
-                                        stage_hits[si].m_objects[oi].m_name] = oi;
+                                    stage_hit_by_names[si][stage_hits[si].m_objects[oi].m_name] = oi;
                                 }
-                                std::cout << "Stage collision " << hit_file.filename().string()
-                                    << ": " << stage_hits[si].m_objects.size() << " objects\n";
+                                std::println("Stage collision {}: {} objects", hit_file.filename().string(),
+                                             stage_hits[si].m_objects.size());
                             }
                             catch (const std::exception& exception)
                             {
@@ -449,13 +449,13 @@ int main(int argc, char** argv)
                         for (std::size_t ni = 0; ni < nodes.size(); ++ni)
                         {
                             const auto& node = nodes[ni];
-                            locals[ni] = sdbz::trs_matrix(
-                                node.m_translation, node.m_rotation_radians, node.m_scale);
+                            locals[ni] = sdbz::trs_matrix(node.m_translation, node.m_rotation_radians, node.m_scale);
                         }
                         std::vector<std::uint8_t> xform_state(nodes.size(), 0);
                         for (std::size_t start = 0; start < nodes.size(); ++start)
                         {
-                            if (xform_state[start] != 0) continue;
+                            if (xform_state[start] != 0)
+                                continue;
                             std::vector<std::size_t> stack;
                             stack.push_back(start);
                             while (!stack.empty())
@@ -469,12 +469,10 @@ int main(int argc, char** argv)
                                 if (xform_state[idx] == 1)
                                 {
                                     const int parent = nodes[idx].m_parent;
-                                    if (parent >= 0 &&
-                                        static_cast<std::size_t>(parent) < nodes.size())
+                                    if (parent >= 0 && static_cast<std::size_t>(parent) < nodes.size())
                                     {
                                         stage_worlds[si][idx] = sdbz::mat4_mul(
-                                            stage_worlds[si][static_cast<std::size_t>(parent)],
-                                            locals[idx]);
+                                            stage_worlds[si][static_cast<std::size_t>(parent)], locals[idx]);
                                     }
                                     else
                                     {
@@ -487,8 +485,7 @@ int main(int argc, char** argv)
                                 if (xform_state[idx] == 0)
                                 {
                                     const int parent = nodes[idx].m_parent;
-                                    if (parent >= 0 &&
-                                        static_cast<std::size_t>(parent) < nodes.size())
+                                    if (parent >= 0 && static_cast<std::size_t>(parent) < nodes.size())
                                     {
                                         if (xform_state[static_cast<std::size_t>(parent)] == 1)
                                         {
@@ -512,8 +509,9 @@ int main(int argc, char** argv)
                             std::size_t root = ni;
                             while (root < nodes.size() && nodes[root].m_parent >= 0)
                                 root = static_cast<std::size_t>(nodes[root].m_parent);
-                            stage_groups[si][ni] = (root == loaded_stages[si].m_stage_root) ? 0 :
-                                ((root == loaded_stages[si].m_effect_root) ? 1 : 2);
+                            stage_groups[si][ni] = (root == loaded_stages[si].m_stage_root)
+                                                       ? 0
+                                                       : ((root == loaded_stages[si].m_effect_root) ? 1 : 2);
                         }
                     }
                 }
@@ -530,16 +528,15 @@ int main(int argc, char** argv)
     if ((is_mdl || is_stg) && texture_path.empty())
     {
         texture_path = find_texture_for(input_path);
-        if (!texture_path.empty()) std::cout << "Auto texture: " << texture_path.string() << '\n';
-        else std::cout << "No matching .pix texture found next to the model\n";
+        std::println("Auto texture: {}", texture_path.string());
+        std::println("No matching .pix texture found next to the model");
     }
     if (is_mdl)
     {
         if (motion_paths.empty())
         {
             motion_paths = find_motions_for(input_path);
-            for (const auto& p : motion_paths) std::cout << "Auto motion: " << p.string() << '\n';
-            if (motion_paths.empty()) std::cout << "No .pmt motion package found next to the model\n";
+            std::println("No .pmt motion package found next to the model");
         }
     }
 
@@ -549,9 +546,8 @@ int main(int argc, char** argv)
         try
         {
             auto package = sdbz::parse_rfsm(sdbz::read_file(path));
-            std::cout << "Loaded motion package " << path.filename().string() << ": "
-                << package.m_motions.size() << " motions, " << package.m_bone_names.size()
-                << " bones\n";
+            std::println("Loaded motion package {}: {} motions, {} bones", path.filename().string(),
+                         package.m_motions.size(), package.m_bone_names.size());
             if (!has_loaded_motion)
             {
                 loaded_motion = std::move(package);
@@ -565,13 +561,13 @@ int main(int argc, char** argv)
         }
         catch (const std::exception& exception)
         {
-            std::cerr << "Motion load unavailable (" << path.filename().string() << "): "
-                << exception.what() << '\n';
-            if (explicit_motion) return 2;
+            std::cerr << "Motion load unavailable (" << path.filename().string() << "): " << exception.what() << '\n';
+            if (explicit_motion)
+                return 2;
         }
     }
-    if (has_loaded_motion && loaded_motion.m_motions.empty()) has_loaded_motion = false;
-
+    if (has_loaded_motion && loaded_motion.m_motions.empty())
+        has_loaded_motion = false;
 
     // Prefer fonts from the archive when available.
     if (has_loaded_archive && has_game_data)
@@ -585,10 +581,9 @@ int main(int argc, char** argv)
                 const std::uint64_t byte_size = entry.m_byte_size;
                 if (offset + byte_size <= game_data.size())
                 {
-                    archive_font_data.assign(game_data.data() + offset,
-                        game_data.data() + offset + byte_size);
+                    archive_font_data.assign(game_data.data() + offset, game_data.data() + offset + byte_size);
                     has_archive_font = true;
-                    std::cout << "Auto font from archive: " << entry.m_name_cp932 << '\n';
+                    std::println("Auto font from archive: {}", entry.m_name_cp932);
                     break;
                 }
             }
@@ -598,17 +593,15 @@ int main(int argc, char** argv)
     // If the archive provided no font, fall back to a .fon next to the input.
     if (!has_archive_font && font_path.empty())
     {
-        font_path = find_font_near(is_mdl || is_pix || is_hit || is_stg
-            ? directory_of(input_path) : input_path);
-        if (!font_path.empty()) std::cout << "Auto font: " << font_path.string() << '\n';
+        font_path = find_font_near(is_mdl || is_pix || is_hit || is_stg ? directory_of(input_path) : input_path);
+        std::println("Auto font: {}", font_path.string());
     }
 
     // ---- SDL / OpenGL / audio platform initialisation ----
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_EVENTS | SDL_INIT_AUDIO);
 
     c_window window;
-    if (!window.create("Super Dragon Ball Z - Native Rebuild (OpenGL)",
-            1120, 490))
+    if (!window.create("Super Dragon Ball Z - Native Rebuild (OpenGL)", 1120, 490))
     {
         std::cerr << "SDL_CreateWindow failed: " << SDL_GetError() << '\n';
         SDL_Quit();
@@ -622,16 +615,14 @@ int main(int argc, char** argv)
     audio_spec.freq = 44100;
     audio_spec.format = SDL_AUDIO_S16;
     audio_spec.channels = 1;
-    SDL_AudioDeviceID audio_device = SDL_OpenAudioDevice(
-        SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec);
+    SDL_AudioDeviceID audio_device = SDL_OpenAudioDevice(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &audio_spec);
     if (!audio_device)
     {
         std::cerr << "SDL_OpenAudioDevice failed: " << SDL_GetError() << '\n';
     }
     else
     {
-        std::cout << "Audio device opened: " << audio_spec.freq << " Hz, "
-            << audio_spec.channels << " channels\n";
+        std::println("Audio device opened: {} Hz, {} channels", audio_spec.freq, audio_spec.channels);
     }
 
     // Load textures AFTER OpenGL context is created.
@@ -643,8 +634,7 @@ int main(int argc, char** argv)
             {
                 texture_names = load_fpix_textures(texture_path);
                 has_textures = !texture_names.empty();
-                std::cout << "Loaded " << texture_names.size() << " textures from "
-                    << texture_path.string() << '\n';
+                std::println("Loaded {} textures from {}", texture_names.size(), texture_path.string());
             }
             catch (const std::exception& exception)
             {
@@ -670,7 +660,7 @@ int main(int argc, char** argv)
             if (has_font)
             {
                 upload_glyph_textures(font, glyph_textures);
-                std::cout << "Loaded " << glyph_textures.size() << " glyph textures\n";
+                std::println("Loaded {} glyph textures", glyph_textures.size());
             }
         }
         catch (const std::exception& exception)
@@ -678,7 +668,7 @@ int main(int argc, char** argv)
             std::cerr << "Font load unavailable: " << exception.what() << '\n';
         }
     }
-    std::cout << "SDL init done\n";
+    std::println("SDL init done");
 
     SDL_Gamepad* gamepad = SDL_OpenGamepad(0);
 
@@ -692,42 +682,35 @@ int main(int argc, char** argv)
                 const auto file_data = sdbz::read_file(stage_pix_paths[si]);
                 stage_textures[si] = load_fpix_textures(file_data);
                 stage_textures_loaded[si] = !stage_textures[si].empty();
-                std::cout << "Loaded stage textures "
-                    << stage_pix_paths[si].filename().string() << ": "
-                    << stage_textures[si].size() << " textures\n";
+                std::println("Loaded stage textures {}: {} textures", stage_pix_paths[si].filename().string(),
+                             stage_textures[si].size());
             }
             catch (const std::exception& exception)
             {
                 std::cerr << "Stage texture load failed: " << exception.what() << '\n';
             }
         }
-        else if (has_loaded_archive &&
-            stage_pix_entry_indices[si] != std::numeric_limits<std::size_t>::max() &&
-            stage_pix_entry_indices[si] < loaded_archive.m_entries.size())
+        else if (has_loaded_archive && stage_pix_entry_indices[si] != std::numeric_limits<std::size_t>::max() &&
+                 stage_pix_entry_indices[si] < loaded_archive.m_entries.size())
         {
             try
             {
-                const auto& entry = loaded_archive.m_entries[
-                    stage_pix_entry_indices[si]];
+                const auto& entry = loaded_archive.m_entries[stage_pix_entry_indices[si]];
                 const std::uint64_t offset = entry.offset();
                 const std::uint64_t byte_size = entry.m_byte_size;
                 if (offset + byte_size <= game_data.size())
                 {
-                    const std::span<const std::uint8_t> entry_data(
-                        game_data.data() + offset, byte_size);
-                    stage_textures[si] = load_fpix_textures(
-                        std::vector<std::uint8_t>(
-                            entry_data.begin(), entry_data.end()));
+                    const std::span<const std::uint8_t> entry_data(game_data.data() + offset, byte_size);
+                    stage_textures[si] =
+                        load_fpix_textures(std::vector<std::uint8_t>(entry_data.begin(), entry_data.end()));
                     stage_textures_loaded[si] = !stage_textures[si].empty();
-                    std::cout << "Loaded stage textures from archive: "
-                        << entry.m_name_cp932 << ": "
-                        << stage_textures[si].size() << " textures\n";
+                    std::println("Loaded stage textures from archive: {}: {} textures", entry.m_name_cp932,
+                                 stage_textures[si].size());
                 }
             }
             catch (const std::exception& exception)
             {
-                std::cerr << "Archive stage texture load failed: "
-                    << exception.what() << '\n';
+                std::cerr << "Archive stage texture load failed: " << exception.what() << '\n';
             }
         }
     }
@@ -794,8 +777,7 @@ int main(int argc, char** argv)
     while (running)
     {
         auto now = SDL_GetPerformanceCounter();
-        double frame_time =
-            (static_cast<double>(now - previous) / frequency);
+        double frame_time = (static_cast<double>(now - previous) / frequency);
         previous = now;
         if (frame_time > 0.25)
         {
@@ -856,20 +838,17 @@ int main(int argc, char** argv)
                     }
                     break;
                 }
-                    if (debug_menu.open && !vfs_open)
-                    {
-                        s_event se{};
-                        se.type = e_event_type::key_down;
-                        se.key = sdl_key_to_e_key(static_cast<int>(event.key.key));
-                        se.mod = static_cast<int>(event.key.mod);
-                        if (debug_menu_input(debug_menu, se, running,
-                        show_effect, show_collision, show_templates,
-                        camera.m_framed, camera.m_yaw, camera.m_pitch,
-                        vfs_open, vfs_path_components, vfs_selected,
-                        has_loaded_archive,
-                        has_loaded_stage, loaded_stage_index, loaded_stages,
-                        has_loaded_motion, motion_clip_index,
-                        loaded_motion.m_motions, animation_time))
+                if (debug_menu.open && !vfs_open)
+                {
+                    s_event se{};
+                    se.type = e_event_type::key_down;
+                    se.key = sdl_key_to_e_key(static_cast<int>(event.key.key));
+                    se.mod = static_cast<int>(event.key.mod);
+                    if (debug_menu_input(debug_menu, se, running, show_effect, show_collision, show_templates,
+                                         camera.m_framed, camera.m_yaw, camera.m_pitch, vfs_open, vfs_path_components,
+                                         vfs_selected, has_loaded_archive, has_loaded_stage, loaded_stage_index,
+                                         loaded_stages, has_loaded_motion, motion_clip_index, loaded_motion.m_motions,
+                                         animation_time))
                     {
                         break;
                     }
@@ -881,7 +860,8 @@ int main(int argc, char** argv)
                     // skipped by subsequent switch case labels.
                     {
                         const int count = static_cast<int>(ctx.vfs_entries.size());
-                        if (count == 0) break;
+                        if (count == 0)
+                            break;
                         if (event.key.key == SDLK_UP)
                         {
                             vfs_selected = (vfs_selected + count - 1) % count;
@@ -891,9 +871,10 @@ int main(int argc, char** argv)
                             vfs_selected = (vfs_selected + 1) % count;
                         }
                         else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE ||
-                            event.key.key == SDLK_RIGHT)
+                                 event.key.key == SDLK_RIGHT)
                         {
-                            if (count == 0 || !has_game_data) break;
+                            if (count == 0 || !has_game_data)
+                                break;
                             const auto& ve = ctx.vfs_entries[vfs_selected];
                             const std::size_t entry_index = ve.index;
                             const auto& entry = loaded_archive.m_entries[entry_index];
@@ -909,385 +890,379 @@ int main(int argc, char** argv)
                                 // Load file based on extension.
                                 const std::uint64_t offset = entry.offset();
                                 const std::uint64_t byte_size = entry.m_byte_size;
-                                if (offset + byte_size > game_data.size()) break;
-                                const std::span<const std::uint8_t> entry_data(
-                                    game_data.data() + offset, byte_size);
+                                if (offset + byte_size > game_data.size())
+                                    break;
+                                const std::span<const std::uint8_t> entry_data(game_data.data() + offset, byte_size);
                                 const std::string ext = fs::path(name).extension().string();
-                            try
-                            {
-                                if (ext == ".mdl" || ext == ".MDL")
+                                try
                                 {
-                                    loaded_model = sdbz::parse_fmdl(
-                                        entry_data, fs::path(name).stem().string());
-                                    has_loaded_model = true;
-                                    mesh_visible.assign(loaded_model.m_meshes.size(), false);
-                                    part_groups.clear();
-                                    for (std::size_t mi = 0;
-                                        mi < loaded_model.m_meshes.size(); ++mi)
+                                    if (ext == ".mdl" || ext == ".MDL")
                                     {
-                                        const auto& mesh_name =
-                                            loaded_model.m_meshes[mi].m_name;
-                                        const std::string label =
-                                            part_base_name(mesh_name);
-                                        auto it = std::find_if(part_groups.begin(),
-                                            part_groups.end(),
-                                            [&](const s_part_group& g)
-                                            { return g.m_label == label; });
-                                        if (it == part_groups.end())
+                                        loaded_model = sdbz::parse_fmdl(entry_data, fs::path(name).stem().string());
+                                        has_loaded_model = true;
+                                        mesh_visible.assign(loaded_model.m_meshes.size(), false);
+                                        part_groups.clear();
+                                        for (std::size_t mi = 0; mi < loaded_model.m_meshes.size(); ++mi)
                                         {
-                                            part_groups.push_back({ label, {}, 0 });
-                                            it = part_groups.end() - 1;
+                                            const auto& mesh_name = loaded_model.m_meshes[mi].m_name;
+                                            const std::string label = part_base_name(mesh_name);
+                                            auto it =
+                                                std::find_if(part_groups.begin(), part_groups.end(),
+                                                             [&](const s_part_group& g) { return g.m_label == label; });
+                                            if (it == part_groups.end())
+                                            {
+                                                part_groups.push_back({label, {}, 0});
+                                                it = part_groups.end() - 1;
+                                            }
+                                            it->m_meshes.push_back(mi);
                                         }
-                                        it->m_meshes.push_back(mi);
+                                        apply_part_visibility(part_groups, mesh_visible);
+                                        std::println("Loaded model from archive: {}", loaded_model.m_name);
                                     }
-                                    apply_part_visibility(part_groups, mesh_visible);
-                                    std::cout << "Loaded model from archive: "
-                                        << loaded_model.m_name << '\n';
-                                }
-                                else if (ext == ".pix" || ext == ".PIX")
-                                {
-                                    for (GLuint t : texture_names)
-                                        if (t) glDeleteTextures(1, &t);
-                                    texture_names = load_fpix_textures(
-                                        std::vector<std::uint8_t>(
-                                            entry_data.begin(), entry_data.end()));
-                                    has_textures = !texture_names.empty();
-                                    std::cout << "Loaded textures from archive: "
-                                        << texture_names.size() << '\n';
-                                }
-                                else if (ext == ".fon" || ext == ".FON")
-                                {
-                                    for (GLuint t : glyph_textures)
-                                        if (t) glDeleteTextures(1, &t);
-                                    glyph_textures.clear();
-                                    has_font = load_ffon(
-                                        std::vector<std::uint8_t>(entry_data.begin(), entry_data.end()),
-                                        font);
-                                    if (has_font)
+                                    else if (ext == ".pix" || ext == ".PIX")
                                     {
-                                        upload_glyph_textures(font, glyph_textures);
-                                        std::cout << "Loaded font from archive: "
-                                            << glyph_textures.size() << " glyphs\n";
+                                        for (GLuint t : texture_names)
+                                            if (t)
+                                                glDeleteTextures(1, &t);
+                                        texture_names = load_fpix_textures(
+                                            std::vector<std::uint8_t>(entry_data.begin(), entry_data.end()));
+                                        has_textures = !texture_names.empty();
+                                        std::println("Loaded textures from archive: {}", texture_names.size());
                                     }
-                                }
-                                else if (ext == ".pmt" || ext == ".mot")
-                                {
-                                    auto package = sdbz::parse_rfsm(entry_data);
-                                    loaded_motion = std::move(package);
-                                    has_loaded_motion = true;
-                                    motion_clip_index = 0;
-                                    animation_time = 0.0f;
-                                    std::cout << "Loaded motions from archive: "
-                                        << loaded_motion.m_motions.size() << '\n';
-                                }
-                                else if (ext == ".stg" || ext == ".STG")
-                                {
-                                    try
+                                    else if (ext == ".fon" || ext == ".FON")
                                     {
-                                        // Clear any previously loaded stage to avoid memory buildup.
-                                        for (auto& lists : stage_mesh_lists)
-                                            for (GLuint l : lists)
-                                                if (l) glDeleteLists(l, 1);
-                                        for (auto& texs : stage_textures)
-                                            for (GLuint t : texs)
-                                                if (t) glDeleteTextures(1, &t);
-                                        stage_mesh_lists.clear(); stage_mesh_lists.shrink_to_fit();
-                                        loaded_stages.clear(); loaded_stages.shrink_to_fit();
-                                        stage_models.clear(); stage_models.shrink_to_fit();
-                                        stage_models_loaded.clear(); stage_models_loaded.shrink_to_fit();
-                                        stage_hits.clear(); stage_hits.shrink_to_fit();
-                                        stage_hits_loaded.clear(); stage_hits_loaded.shrink_to_fit();
-                                        stage_textures.clear(); stage_textures.shrink_to_fit();
-                                        stage_textures_loaded.clear(); stage_textures_loaded.shrink_to_fit();
-                                        stage_pix_paths.clear(); stage_pix_paths.shrink_to_fit();
-                                        stage_pix_entry_indices.clear(); stage_pix_entry_indices.shrink_to_fit();
-                                        stage_worlds.clear(); stage_worlds.shrink_to_fit();
-                                        stage_groups.clear(); stage_groups.shrink_to_fit();
-                                        stage_meshes_by_names.clear(); stage_meshes_by_names.shrink_to_fit();
-                                        stage_hit_by_names.clear(); stage_hit_by_names.shrink_to_fit();
-                                        has_loaded_stage = false;
-                                        has_stage_model = false;
-                                        has_stage_hit = false;
-                                        loaded_stage_index = 0;
-
-                                        const std::string stage_stem =
-                                            fs::path(name).stem().string();
-                                        sdbz::s_stage stg = sdbz::parse_stg(entry_data);
-
-                                        // Find companion files in the archive by stem name.
-                                        // Archive entries may carry path prefixes (e.g.
-                                        // "stg/s00/s00a.mdl") so match by stem suffix.
-                                        auto find_archive_entry = [&](std::string_view extension)
-                                            -> const sdbz::s_archive_entry*
+                                        for (GLuint t : glyph_textures)
+                                            if (t)
+                                                glDeleteTextures(1, &t);
+                                        glyph_textures.clear();
+                                        has_font = load_ffon(
+                                            std::vector<std::uint8_t>(entry_data.begin(), entry_data.end()), font);
+                                        if (has_font)
                                         {
-                                            const std::string target =
-                                                lower_copy(stage_stem + std::string(extension));
-                                            for (const auto& candidate :
-                                                loaded_archive.m_entries)
+                                            upload_glyph_textures(font, glyph_textures);
+                                            std::println("Loaded font from archive: {} glyphs", glyph_textures.size());
+                                        }
+                                    }
+                                    else if (ext == ".pmt" || ext == ".mot")
+                                    {
+                                        auto package = sdbz::parse_rfsm(entry_data);
+                                        loaded_motion = std::move(package);
+                                        has_loaded_motion = true;
+                                        motion_clip_index = 0;
+                                        animation_time = 0.0f;
+                                        std::println("Loaded motions from archive: {}", loaded_motion.m_motions.size());
+                                    }
+                                    else if (ext == ".stg" || ext == ".STG")
+                                    {
+                                        try
+                                        {
+                                            // Clear any previously loaded stage to avoid memory buildup.
+                                            for (auto& lists : stage_mesh_lists)
+                                                for (GLuint l : lists)
+                                                    if (l)
+                                                        glDeleteLists(l, 1);
+                                            for (auto& texs : stage_textures)
+                                                for (GLuint t : texs)
+                                                    if (t)
+                                                        glDeleteTextures(1, &t);
+                                            stage_mesh_lists.clear();
+                                            stage_mesh_lists.shrink_to_fit();
+                                            loaded_stages.clear();
+                                            loaded_stages.shrink_to_fit();
+                                            stage_models.clear();
+                                            stage_models.shrink_to_fit();
+                                            stage_models_loaded.clear();
+                                            stage_models_loaded.shrink_to_fit();
+                                            stage_hits.clear();
+                                            stage_hits.shrink_to_fit();
+                                            stage_hits_loaded.clear();
+                                            stage_hits_loaded.shrink_to_fit();
+                                            stage_textures.clear();
+                                            stage_textures.shrink_to_fit();
+                                            stage_textures_loaded.clear();
+                                            stage_textures_loaded.shrink_to_fit();
+                                            stage_pix_paths.clear();
+                                            stage_pix_paths.shrink_to_fit();
+                                            stage_pix_entry_indices.clear();
+                                            stage_pix_entry_indices.shrink_to_fit();
+                                            stage_worlds.clear();
+                                            stage_worlds.shrink_to_fit();
+                                            stage_groups.clear();
+                                            stage_groups.shrink_to_fit();
+                                            stage_meshes_by_names.clear();
+                                            stage_meshes_by_names.shrink_to_fit();
+                                            stage_hit_by_names.clear();
+                                            stage_hit_by_names.shrink_to_fit();
+                                            has_loaded_stage = false;
+                                            has_stage_model = false;
+                                            has_stage_hit = false;
+                                            loaded_stage_index = 0;
+
+                                            const std::string stage_stem = fs::path(name).stem().string();
+                                            sdbz::s_stage stg = sdbz::parse_stg(entry_data);
+
+                                            // Find companion files in the archive by stem name.
+                                            // Archive entries may carry path prefixes (e.g.
+                                            // "stg/s00/s00a.mdl") so match by stem suffix.
+                                            auto find_archive_entry =
+                                                [&](std::string_view extension) -> const sdbz::s_archive_entry*
                                             {
-                                                const std::string name =
-                                                    lower_copy(
-                                                        candidate.m_name_cp932);
-                                                if (name == target ||
-                                                    (name.size() >= target.size() &&
-                                                     name.compare(
-                                                        name.size() - target.size(),
-                                                        target.size(), target) == 0))
+                                                const std::string target =
+                                                    lower_copy(stage_stem + std::string(extension));
+                                                for (const auto& candidate : loaded_archive.m_entries)
                                                 {
-                                                    return &candidate;
+                                                    const std::string name = lower_copy(candidate.m_name_cp932);
+                                                    if (name == target || (name.size() >= target.size() &&
+                                                                           name.compare(name.size() - target.size(),
+                                                                                        target.size(), target) == 0))
+                                                    {
+                                                        return &candidate;
+                                                    }
+                                                }
+                                                return nullptr;
+                                            };
+
+                                            // Stage model (.mdl).
+                                            stage_meshes_by_names.emplace_back();
+                                            const auto* model_entry = find_archive_entry(".mdl");
+                                            if (model_entry)
+                                            {
+                                                const std::uint64_t moffset = model_entry->offset();
+                                                const std::uint64_t msize = model_entry->m_byte_size;
+                                                if (moffset + msize <= game_data.size())
+                                                {
+                                                    const std::span<const std::uint8_t> mdata(
+                                                        game_data.data() + moffset, msize);
+                                                    stage_models.emplace_back(
+                                                        sdbz::parse_fmdl(mdata, model_entry->m_name_cp932));
+                                                    stage_models_loaded.push_back(true);
+                                                    has_stage_model = true;
+                                                    std::size_t mi = stage_models.size() - 1;
+                                                    for (std::size_t mxi = 0; mxi < stage_models[mi].m_meshes.size();
+                                                         ++mxi)
+                                                    {
+                                                        stage_meshes_by_names
+                                                            .back()[stage_models[mi].m_meshes[mxi].m_name]
+                                                            .push_back(mxi);
+                                                    }
+                                                    std::println("Stage model from archive: {} ({} meshes)",
+                                                                 model_entry->m_name_cp932,
+                                                                 stage_models.back().m_meshes.size());
                                                 }
                                             }
-                                            return nullptr;
-                                        };
-
-                                        // Stage model (.mdl).
-                                        stage_meshes_by_names.emplace_back();
-                                        const auto* model_entry = find_archive_entry(".mdl");
-                                        if (model_entry)
-                                        {
-                                            const std::uint64_t moffset = model_entry->offset();
-                                            const std::uint64_t msize = model_entry->m_byte_size;
-                                            if (moffset + msize <= game_data.size())
+                                            else
                                             {
-                                                const std::span<const std::uint8_t> mdata(
-                                                    game_data.data() + moffset, msize);
-                                                stage_models.emplace_back(
-                                                    sdbz::parse_fmdl(
-                                                        mdata, model_entry->m_name_cp932));
-                                                stage_models_loaded.push_back(true);
-                                                has_stage_model = true;
-                                                std::size_t mi =
-                                                    stage_models.size() - 1;
-                                                for (std::size_t mxi = 0;
-                                                    mxi < stage_models[mi].m_meshes.size();
-                                                    ++mxi)
-                                                {
-                                                    stage_meshes_by_names.back()[
-                                                        stage_models[mi].m_meshes[mxi].m_name
-                                                    ].push_back(mxi);
-                                                }
-                                                std::cout << "Stage model from archive: "
-                                                    << model_entry->m_name_cp932 << " ("
-                                                    << stage_models.back().m_meshes.size()
-                                                    << " meshes)\n";
+                                                std::cerr << "No " << stage_stem
+                                                          << ".mdl in archive; showing node hierarchy only\n";
+                                                stage_models.emplace_back();
+                                                stage_models_loaded.push_back(false);
                                             }
-                                        }
-                                        else
-                                        {
-                                            std::cerr << "No " << stage_stem
-                                                << ".mdl in archive; showing node hierarchy only\n";
-                                            stage_models.emplace_back();
-                                            stage_models_loaded.push_back(false);
-                                        }
 
-                                        // Collision (.hit).
-                                        const auto* hit_entry = find_archive_entry(".hit");
-                                        if (hit_entry)
-                                        {
-                                            stage_hit_by_names.emplace_back();
-                                            const std::uint64_t hoffset = hit_entry->offset();
-                                            const std::uint64_t hsize = hit_entry->m_byte_size;
-                                            if (hoffset + hsize <= game_data.size())
+                                            // Collision (.hit).
+                                            const auto* hit_entry = find_archive_entry(".hit");
+                                            if (hit_entry)
                                             {
-                                                const std::span<const std::uint8_t> hdata(
-                                                    game_data.data() + hoffset, hsize);
-                                                stage_hits.push_back(sdbz::parse_hit(hdata));
-                                                stage_hits_loaded.push_back(true);
-                                                has_stage_hit = true;
-                                                for (std::size_t oi = 0;
-                                                    oi < stage_hits.back().m_objects.size();
-                                                    ++oi)
+                                                stage_hit_by_names.emplace_back();
+                                                const std::uint64_t hoffset = hit_entry->offset();
+                                                const std::uint64_t hsize = hit_entry->m_byte_size;
+                                                if (hoffset + hsize <= game_data.size())
                                                 {
-                                                    stage_hit_by_names.back()[
-                                                        stage_hits.back().m_objects[oi].m_name
-                                                    ] = oi;
+                                                    const std::span<const std::uint8_t> hdata(
+                                                        game_data.data() + hoffset, hsize);
+                                                    stage_hits.push_back(sdbz::parse_hit(hdata));
+                                                    stage_hits_loaded.push_back(true);
+                                                    has_stage_hit = true;
+                                                    for (std::size_t oi = 0; oi < stage_hits.back().m_objects.size();
+                                                         ++oi)
+                                                    {
+                                                        stage_hit_by_names
+                                                            .back()[stage_hits.back().m_objects[oi].m_name] = oi;
+                                                    }
+                                                    std::println("Stage collision from archive: {} ({} objects)",
+                                                                 hit_entry->m_name_cp932,
+                                                                 stage_hits.back().m_objects.size());
                                                 }
-                                                std::cout << "Stage collision from archive: "
-                                                    << hit_entry->m_name_cp932 << " ("
-                                                    << stage_hits.back().m_objects.size()
-                                                    << " objects)\n";
                                             }
-                                        }
-                                        else
-                                        {
-                                            stage_hits.emplace_back();
-                                            stage_hits_loaded.push_back(false);
-                                        }
+                                            else
+                                            {
+                                                stage_hits.emplace_back();
+                                                stage_hits_loaded.push_back(false);
+                                            }
 
-                                        // Stage textures (.pix) - loaded lazily after GL context.
-                                        const auto* pix_entry = find_archive_entry(".pix");
-                                        stage_pix_paths.push_back(fs::path());
-                                        stage_textures.emplace_back();
-                                        stage_textures_loaded.push_back(false);
-                                        if (pix_entry)
-                                        {
-                                            const std::size_t pix_index =
-                                                static_cast<std::size_t>(
+                                            // Stage textures (.pix) - loaded lazily after GL context.
+                                            const auto* pix_entry = find_archive_entry(".pix");
+                                            stage_pix_paths.push_back(fs::path());
+                                            stage_textures.emplace_back();
+                                            stage_textures_loaded.push_back(false);
+                                            if (pix_entry)
+                                            {
+                                                const std::size_t pix_index = static_cast<std::size_t>(
                                                     pix_entry - loaded_archive.m_entries.data());
-                                            stage_pix_entry_indices.push_back(pix_index);
-                                            try
-                                            {
-                                                const auto& pix_entry_ref = loaded_archive.m_entries[pix_index];
-                                                const std::uint64_t pix_offset = pix_entry_ref.offset();
-                                                const std::uint64_t pix_byte_size = pix_entry_ref.m_byte_size;
-                                                if (pix_offset + pix_byte_size <= game_data.size())
+                                                stage_pix_entry_indices.push_back(pix_index);
+                                                try
                                                 {
-                                                    const std::span<const std::uint8_t> pix_data(
-                                                        game_data.data() + pix_offset, pix_byte_size);
-                                                    stage_textures.back() = load_fpix_textures(
-                                                        std::vector<std::uint8_t>(
-                                                            pix_data.begin(), pix_data.end()));
-                                                    stage_textures_loaded.back() =
-                                                        !stage_textures.back().empty();
-                                                    std::cout << "Loaded stage textures from archive: "
-                                                        << pix_entry_ref.m_name_cp932 << ": "
-                                                        << stage_textures.back().size() << " textures\n";
+                                                    const auto& pix_entry_ref = loaded_archive.m_entries[pix_index];
+                                                    const std::uint64_t pix_offset = pix_entry_ref.offset();
+                                                    const std::uint64_t pix_byte_size = pix_entry_ref.m_byte_size;
+                                                    if (pix_offset + pix_byte_size <= game_data.size())
+                                                    {
+                                                        const std::span<const std::uint8_t> pix_data(
+                                                            game_data.data() + pix_offset, pix_byte_size);
+                                                        stage_textures.back() =
+                                                            load_fpix_textures(std::vector<std::uint8_t>(
+                                                                pix_data.begin(), pix_data.end()));
+                                                        stage_textures_loaded.back() = !stage_textures.back().empty();
+                                                        std::println(
+                                                            "Loaded stage textures from archive: {}: {} textures",
+                                                            pix_entry_ref.m_name_cp932, stage_textures.back().size());
+                                                    }
+                                                }
+                                                catch (const std::exception& exception)
+                                                {
+                                                    std::cerr
+                                                        << "Archive stage texture load failed: " << exception.what()
+                                                        << '\n';
                                                 }
                                             }
-                                            catch (const std::exception& exception)
+                                            else
                                             {
-                                                std::cerr << "Archive stage texture load failed: "
-                                                    << exception.what() << '\n';
+                                                stage_pix_entry_indices.push_back(
+                                                    std::numeric_limits<std::size_t>::max());
                                             }
-                                        }
-                                        else
-                                        {
-                                            stage_pix_entry_indices.push_back(
-                                                std::numeric_limits<std::size_t>::max());
-                                        }
 
-                                        loaded_stages.push_back(std::move(stg));
-                                        stage_worlds.emplace_back();
-                                        stage_groups.emplace_back();
-                                        stage_mesh_lists.emplace_back();
+                                            loaded_stages.push_back(std::move(stg));
+                                            stage_worlds.emplace_back();
+                                            stage_groups.emplace_back();
+                                            stage_mesh_lists.emplace_back();
 
-                                        // Compute world transforms for the new stage.
-                                        const std::size_t si = loaded_stages.size() - 1;
-                                        const auto& nodes = loaded_stages[si].m_nodes;
-                                        stage_worlds[si].resize(nodes.size());
-                                        stage_groups[si].assign(nodes.size(), 2);
-                                        std::vector<sdbz::mat4> locals(nodes.size());
-                                        for (std::size_t ni = 0; ni < nodes.size(); ++ni)
-                                        {
-                                            const auto& node = nodes[ni];
-                                            locals[ni] = sdbz::trs_matrix(
-                                                node.m_translation, node.m_rotation_radians,
-                                                node.m_scale);
-                                        }
-                                        std::vector<std::uint8_t> xform_state(nodes.size(), 0);
-                                        for (std::size_t start = 0; start < nodes.size(); ++start)
-                                        {
-                                            if (xform_state[start] != 0) continue;
-                                            std::vector<std::size_t> stack;
-                                            stack.push_back(start);
-                                            while (!stack.empty())
+                                            // Compute world transforms for the new stage.
+                                            const std::size_t si = loaded_stages.size() - 1;
+                                            const auto& nodes = loaded_stages[si].m_nodes;
+                                            stage_worlds[si].resize(nodes.size());
+                                            stage_groups[si].assign(nodes.size(), 2);
+                                            std::vector<sdbz::mat4> locals(nodes.size());
+                                            for (std::size_t ni = 0; ni < nodes.size(); ++ni)
                                             {
-                                                const std::size_t idx = stack.back();
-                                                if (xform_state[idx] == 2)
-                                                {
-                                                    stack.pop_back();
+                                                const auto& node = nodes[ni];
+                                                locals[ni] = sdbz::trs_matrix(node.m_translation,
+                                                                              node.m_rotation_radians, node.m_scale);
+                                            }
+                                            std::vector<std::uint8_t> xform_state(nodes.size(), 0);
+                                            for (std::size_t start = 0; start < nodes.size(); ++start)
+                                            {
+                                                if (xform_state[start] != 0)
                                                     continue;
-                                                }
-                                                if (xform_state[idx] == 1)
+                                                std::vector<std::size_t> stack;
+                                                stack.push_back(start);
+                                                while (!stack.empty())
                                                 {
-                                                    const int parent = nodes[idx].m_parent;
-                                                    if (parent >= 0 &&
-                                                        static_cast<std::size_t>(parent) < nodes.size())
+                                                    const std::size_t idx = stack.back();
+                                                    if (xform_state[idx] == 2)
                                                     {
-                                                        stage_worlds[si][idx] = sdbz::mat4_mul(
-                                                            stage_worlds[si][static_cast<std::size_t>(parent)],
-                                                            locals[idx]);
+                                                        stack.pop_back();
+                                                        continue;
                                                     }
-                                                    else
+                                                    if (xform_state[idx] == 1)
                                                     {
-                                                        stage_worlds[si][idx] = locals[idx];
-                                                    }
-                                                    xform_state[idx] = 2;
-                                                    stack.pop_back();
-                                                    continue;
-                                                }
-                                                if (xform_state[idx] == 0)
-                                                {
-                                                    const int parent = nodes[idx].m_parent;
-                                                    if (parent >= 0 &&
-                                                        static_cast<std::size_t>(parent) < nodes.size())
-                                                    {
-                                                        if (xform_state[static_cast<std::size_t>(parent)] == 1)
+                                                        const int parent = nodes[idx].m_parent;
+                                                        if (parent >= 0 &&
+                                                            static_cast<std::size_t>(parent) < nodes.size())
+                                                        {
+                                                            stage_worlds[si][idx] = sdbz::mat4_mul(
+                                                                stage_worlds[si][static_cast<std::size_t>(parent)],
+                                                                locals[idx]);
+                                                        }
+                                                        else
                                                         {
                                                             stage_worlds[si][idx] = locals[idx];
-                                                            xform_state[idx] = 2;
-                                                            stack.pop_back();
-                                                            continue;
                                                         }
-                                                        if (xform_state[static_cast<std::size_t>(parent)] == 0)
-                                                        {
-                                                            stack.push_back(static_cast<std::size_t>(parent));
-                                                        }
+                                                        xform_state[idx] = 2;
+                                                        stack.pop_back();
+                                                        continue;
                                                     }
-                                                    xform_state[idx] = 1;
-                                                    continue;
+                                                    if (xform_state[idx] == 0)
+                                                    {
+                                                        const int parent = nodes[idx].m_parent;
+                                                        if (parent >= 0 &&
+                                                            static_cast<std::size_t>(parent) < nodes.size())
+                                                        {
+                                                            if (xform_state[static_cast<std::size_t>(parent)] == 1)
+                                                            {
+                                                                stage_worlds[si][idx] = locals[idx];
+                                                                xform_state[idx] = 2;
+                                                                stack.pop_back();
+                                                                continue;
+                                                            }
+                                                            if (xform_state[static_cast<std::size_t>(parent)] == 0)
+                                                            {
+                                                                stack.push_back(static_cast<std::size_t>(parent));
+                                                            }
+                                                        }
+                                                        xform_state[idx] = 1;
+                                                        continue;
+                                                    }
                                                 }
                                             }
-                                        }
-                                        for (std::size_t ni = 0; ni < nodes.size(); ++ni)
-                                        {
-                                            std::size_t root = ni;
-                                            while (root < nodes.size() && nodes[root].m_parent >= 0)
-                                                root = static_cast<std::size_t>(nodes[root].m_parent);
-                                            stage_groups[si][ni] = (root == loaded_stages[si].m_stage_root) ? 0 :
-                                                ((root == loaded_stages[si].m_effect_root) ? 1 : 2);
-                                        }
+                                            for (std::size_t ni = 0; ni < nodes.size(); ++ni)
+                                            {
+                                                std::size_t root = ni;
+                                                while (root < nodes.size() && nodes[root].m_parent >= 0)
+                                                    root = static_cast<std::size_t>(nodes[root].m_parent);
+                                                stage_groups[si][ni] =
+                                                    (root == loaded_stages[si].m_stage_root)
+                                                        ? 0
+                                                        : ((root == loaded_stages[si].m_effect_root) ? 1 : 2);
+                                            }
 
-                                        has_loaded_stage = true;
-                                        loaded_stage_index = loaded_stages.size() - 1;
-                                        camera.m_framed = false; // reframe on the newly loaded stage
-                                        std::cout << "Loaded stage from archive: " << name
-                                            << " (" << loaded_stages.back().m_nodes.size()
-                                            << " nodes)\n";
+                                            has_loaded_stage = true;
+                                            loaded_stage_index = loaded_stages.size() - 1;
+                                            camera.m_framed = false; // reframe on the newly loaded stage
+                                            std::println("Loaded stage from archive: {} ({} nodes)", name,
+                                                         loaded_stages.back().m_nodes.size());
+                                        }
+                                        catch (const std::exception& exception)
+                                        {
+                                            std::cerr << "Stage load from archive failed (" << name
+                                                      << "): " << exception.what() << '\n';
+                                        }
                                     }
-                                    catch (const std::exception& exception)
+                                    else if (ext == ".hit" || ext == ".HIT")
                                     {
-                                        std::cerr << "Stage load from archive failed ("
-                                            << name << "): " << exception.what() << '\n';
+                                        loaded_hit = sdbz::parse_hit(entry_data);
+                                        has_loaded_hit = true;
+                                        std::println("Loaded hit from archive: {} objects",
+                                                     loaded_hit.m_objects.size());
+                                    }
+                                    else
+                                    {
+                                        std::println("Archive entry not loadable: {}", name);
                                     }
                                 }
-                                else if (ext == ".hit" || ext == ".HIT")
+                                catch (const std::exception& exception)
                                 {
-                                    loaded_hit = sdbz::parse_hit(entry_data);
-                                    has_loaded_hit = true;
-                                    std::cout << "Loaded hit from archive: "
-                                        << loaded_hit.m_objects.size() << " objects\n";
-                                }
-                                else
-                                {
-                                    std::cout << "Archive entry not loadable: " << name << '\n';
+                                    std::cerr << "Archive entry load failed (" << name << "): " << exception.what()
+                                              << '\n';
                                 }
                             }
-                            catch (const std::exception& exception)
-                            {
-                                std::cerr << "Archive entry load failed (" << name << "): "
-                                    << exception.what() << '\n';
-                            }
+                            break;
                         }
-                        break;
-                    }
-                    else if (event.key.key == SDLK_BACKSPACE || event.key.key == SDLK_LEFT)
-                    {
-                        // Go up one directory level.
-                        if (!vfs_path_components.empty())
+                        else if (event.key.key == SDLK_BACKSPACE || event.key.key == SDLK_LEFT)
                         {
-                            vfs_path_components.pop_back();
-                            vfs_selected = 0;
+                            // Go up one directory level.
+                            if (!vfs_path_components.empty())
+                            {
+                                vfs_path_components.pop_back();
+                                vfs_selected = 0;
+                            }
+                            break;
                         }
-                        break;
+                        else if (event.key.key == SDLK_ESCAPE)
+                        {
+                            vfs_open = false;
+                            vfs_selected = 0;
+                            break;
+                        }
                     }
-                    else if (event.key.key == SDLK_ESCAPE)
-                    {
-                        vfs_open = false;
-                        vfs_selected = 0;
-                        break;
-                    }
-                }
                 }
                 if (event.key.key == SDLK_ESCAPE)
                 {
@@ -1299,50 +1274,43 @@ int main(int argc, char** argv)
                     const bool backwards = (event.key.mod & SDL_KMOD_SHIFT) != 0;
                     if (event.key.key >= SDLK_1 && event.key.key <= SDLK_9)
                     {
-                        const std::size_t gi =
-                            static_cast<std::size_t>(event.key.key - SDLK_1);
+                        const std::size_t gi = static_cast<std::size_t>(event.key.key - SDLK_1);
                         if (gi < part_groups.size())
                         {
                             auto& group = part_groups[gi];
-                            const std::size_t states =
-                                group.m_meshes.size() + 1; // variants + hidden
-                            group.m_active = backwards ? (group.m_active + states - 1) % states
-                                : (group.m_active + 1) % states;
+                            const std::size_t states = group.m_meshes.size() + 1; // variants + hidden
+                            group.m_active =
+                                backwards ? (group.m_active + states - 1) % states : (group.m_active + 1) % states;
                             apply_part_visibility(part_groups, mesh_visible);
-                            std::cout << group.m_label << ": "
-                                << (group.m_active < group.m_meshes.size()
-                                    ? loaded_model.m_meshes[
-                                        group.m_meshes[group.m_active]].m_name
-                                    : std::string("(hidden)"))
-                                << '\n';
+                            std::println("{}: {}", group.m_label,
+                                         group.m_active < group.m_meshes.size()
+                                             ? loaded_model.m_meshes[group.m_meshes[group.m_active]].m_name
+                                             : std::string("(hidden)"));
                         }
                     }
                     else if (event.key.key == SDLK_0)
                     {
-                        for (auto& group : part_groups) group.m_active = 0;
+                        for (auto& group : part_groups)
+                            group.m_active = 0;
                         apply_part_visibility(part_groups, mesh_visible);
                     }
                 }
                 // Stage viewer toggles.
                 if (has_loaded_stage)
                 {
-                    if (event.key.key == SDLK_E) show_effect = !show_effect;
-                    else if (event.key.key == SDLK_C) show_collision = !show_collision;
-                    else if (event.key.key == SDLK_T) show_templates = !show_templates;
+                    if (event.key.key == SDLK_E)
+                        show_effect = !show_effect;
+                    else if (event.key.key == SDLK_T)
+                        show_templates = !show_templates;
                     else if (event.key.key == SDLK_PAGEUP)
                     {
-                        loaded_stage_index =
-                            (loaded_stage_index + loaded_stages.size() - 1) %
-                            loaded_stages.size();
-                        std::cout << "Stage: "
-                            << loaded_stages[loaded_stage_index].m_names[0] << '\n';
+                        loaded_stage_index = (loaded_stage_index + loaded_stages.size() - 1) % loaded_stages.size();
+                        std::println("Stage: {}", loaded_stages[loaded_stage_index].m_names[0]);
                     }
                     else if (event.key.key == SDLK_PAGEDOWN)
                     {
-                        loaded_stage_index =
-                            (loaded_stage_index + 1) % loaded_stages.size();
-                        std::cout << "Stage: "
-                            << loaded_stages[loaded_stage_index].m_names[0] << '\n';
+                        loaded_stage_index = (loaded_stage_index + 1) % loaded_stages.size();
+                        std::println("Stage: {}", loaded_stages[loaded_stage_index].m_names[0]);
                     }
                 }
                 // Camera zoom and re-fit.
@@ -1365,20 +1333,18 @@ int main(int argc, char** argv)
                 {
                     if (event.key.key == SDLK_N)
                     {
-                        motion_clip_index =
-                            (motion_clip_index + 1) % loaded_motion.m_motions.size();
+                        motion_clip_index = (motion_clip_index + 1) % loaded_motion.m_motions.size();
                         animation_time = 0.0f;
-                        std::cout << "Motion clip " << motion_clip_index << ": "
-                            << loaded_motion.m_motions[motion_clip_index].m_name << '\n';
+                        std::println("Motion clip {}: {}", motion_clip_index,
+                                     loaded_motion.m_motions[motion_clip_index].m_name);
                     }
                     else if (event.key.key == SDLK_B)
                     {
                         motion_clip_index =
-                            (motion_clip_index + loaded_motion.m_motions.size() - 1)
-                            % loaded_motion.m_motions.size();
+                            (motion_clip_index + loaded_motion.m_motions.size() - 1) % loaded_motion.m_motions.size();
                         animation_time = 0.0f;
-                        std::cout << "Motion clip " << motion_clip_index << ": "
-                            << loaded_motion.m_motions[motion_clip_index].m_name << '\n';
+                        std::println("Motion clip {}: {}", motion_clip_index,
+                                     loaded_motion.m_motions[motion_clip_index].m_name);
                     }
                 }
                 break;
@@ -1393,8 +1359,7 @@ int main(int argc, char** argv)
                     cur_mouse_x = last_mouse_x;
                     cur_mouse_y = last_mouse_y;
                 }
-                else if (event.button.button == SDL_BUTTON_RIGHT ||
-                    event.button.button == SDL_BUTTON_MIDDLE)
+                else if (event.button.button == SDL_BUTTON_RIGHT || event.button.button == SDL_BUTTON_MIDDLE)
                 {
                     pan_button_down = true;
                     last_mouse_x = static_cast<int>(event.button.x);
@@ -1408,8 +1373,7 @@ int main(int argc, char** argv)
                 {
                     left_button_down = false;
                 }
-                else if (event.button.button == SDL_BUTTON_RIGHT ||
-                    event.button.button == SDL_BUTTON_MIDDLE)
+                else if (event.button.button == SDL_BUTTON_RIGHT || event.button.button == SDL_BUTTON_MIDDLE)
                 {
                     pan_button_down = false;
                 }
@@ -1435,8 +1399,8 @@ int main(int argc, char** argv)
                     // scene follows the cursor. Ortho view spans 2*distance vertically.
                     int window_w = 0, window_h = 0;
                     window.get_size_pixels(window_w, window_h);
-                    const float units_per_pixel = 2.0f * camera.m_distance /
-                        static_cast<float>(window_h > 0 ? window_h : 1);
+                    const float units_per_pixel =
+                        2.0f * camera.m_distance / static_cast<float>(window_h > 0 ? window_h : 1);
                     const float dx = (event.motion.x - last_mouse_x) * units_per_pixel;
                     const float dy = (event.motion.y - last_mouse_y) * units_per_pixel;
                     constexpr float k_deg_to_rad = 0.01745329251994329577f;
@@ -1444,8 +1408,8 @@ int main(int argc, char** argv)
                     const float b = -camera.m_pitch * k_deg_to_rad;
                     const float sa = std::sin(a), ca = std::cos(a);
                     const float sb = std::sin(b), cb = std::cos(b);
-                    const std::array<float, 3> right{ ca, 0.0f, sa };
-                    const std::array<float, 3> up{ sa * sb, cb, -sb * ca };
+                    const std::array<float, 3> right{ca, 0.0f, sa};
+                    const std::array<float, 3> up{sa * sb, cb, -sb * ca};
                     for (int c = 0; c < 3; ++c)
                     {
                         camera.m_target[c] += -right[c] * dx + up[c] * dy;
@@ -1460,8 +1424,7 @@ int main(int argc, char** argv)
                 // cursor at the same screen position as the ortho volume scales.
                 const float wheel = static_cast<float>(event.wheel.y);
                 const float prev_distance = camera.m_distance;
-                camera.m_distance =
-                    std::clamp(camera.m_distance * std::pow(0.88f, wheel), 0.05f, 1.0e6f);
+                camera.m_distance = std::clamp(camera.m_distance * std::pow(0.88f, wheel), 0.05f, 1.0e6f);
                 const float dd = prev_distance - camera.m_distance;
                 if (dd != 0.0f)
                 {
@@ -1472,10 +1435,10 @@ int main(int argc, char** argv)
                         // View-space delta between old and new projection at the cursor.
                         // dv = (dd/h) * (2*mx - w, h - 2*my, 0)
                         const float scale = dd / static_cast<float>(window_h);
-                        const float dv_x = scale * (2.0f * static_cast<float>(cur_mouse_x) -
-                            static_cast<float>(window_w));
-                        const float dv_y = scale * (static_cast<float>(window_h) -
-                            2.0f * static_cast<float>(cur_mouse_y));
+                        const float dv_x =
+                            scale * (2.0f * static_cast<float>(cur_mouse_x) - static_cast<float>(window_w));
+                        const float dv_y =
+                            scale * (static_cast<float>(window_h) - 2.0f * static_cast<float>(cur_mouse_y));
                         // Rotate view-space delta into world space by the inverse
                         // camera rotation (yaw then pitch).
                         const float k_deg_to_rad = 0.01745329251994329577f;
@@ -1543,13 +1506,11 @@ int main(int argc, char** argv)
         ctx.debug.selected = debug_menu.selected;
         if (debug_menu.open && !vfs_open)
         {
-            debug_menu_build(debug_menu,
-                has_loaded_stage,
-                has_loaded_stage ? loaded_stages[loaded_stage_index].m_names[0].c_str() : nullptr,
-                has_loaded_motion,
-                has_loaded_motion ? loaded_motion.m_motions[motion_clip_index].m_name.c_str() : nullptr,
-                show_effect, show_collision, show_templates,
-                has_loaded_archive);
+            debug_menu_build(debug_menu, has_loaded_stage,
+                             has_loaded_stage ? loaded_stages[loaded_stage_index].m_names[0].c_str() : nullptr,
+                             has_loaded_motion,
+                             has_loaded_motion ? loaded_motion.m_motions[motion_clip_index].m_name.c_str() : nullptr,
+                             show_effect, show_collision, show_templates, has_loaded_archive);
             ctx.debug.items = debug_menu.items;
             ctx.debug.selected = debug_menu.selected;
             ctx.debug.stack = debug_menu.stack;
@@ -1572,7 +1533,8 @@ int main(int argc, char** argv)
             std::string prefix;
             for (const auto& comp : vfs_path_components)
             {
-                if (!prefix.empty()) prefix += "/";
+                if (!prefix.empty())
+                    prefix += "/";
                 prefix += comp;
             }
 
@@ -1590,8 +1552,7 @@ int main(int argc, char** argv)
                 {
                     // The character right after the prefix must be a separator,
                     // otherwise dis/d00.pix matches prefix dis/d00 (false child).
-                    if (!prefix.empty() && name.size() > prefix.size() &&
-                        name[prefix.size()] != '/')
+                    if (!prefix.empty() && name.size() > prefix.size() && name[prefix.size()] != '/')
                     {
                         continue;
                     }
@@ -1607,22 +1568,19 @@ int main(int argc, char** argv)
                     seen_names.push_back(child);
                     const bool is_dir = (sep != std::string::npos) || entry.m_is_directory;
                     if (is_dir)
-                        dirs.push_back({ child, i });
+                        dirs.push_back({child, i});
                     else
-                        files.push_back({ child, i });
+                        files.push_back({child, i});
                 }
             }
-            std::sort(dirs.begin(), dirs.end(),
-                [](const auto& a, const auto& b) { return a.first < b.first; });
-            std::sort(files.begin(), files.end(),
-                [](const auto& a, const auto& b) { return a.first < b.first; });
+            std::sort(dirs.begin(), dirs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+            std::sort(files.begin(), files.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
             for (const auto& d : dirs)
-                ctx.vfs_entries.push_back({ d.second, d.first, true });
+                ctx.vfs_entries.push_back({d.second, d.first, true});
             for (const auto& f : files)
-                ctx.vfs_entries.push_back({ f.second, f.first, false });
+                ctx.vfs_entries.push_back({f.second, f.first, false});
 
-            if (vfs_selected < 0 ||
-                vfs_selected >= static_cast<int>(ctx.vfs_entries.size()))
+            if (vfs_selected < 0 || vfs_selected >= static_cast<int>(ctx.vfs_entries.size()))
             {
                 vfs_selected = 0;
                 ctx.vfs_selected = 0;
@@ -1635,7 +1593,8 @@ int main(int argc, char** argv)
     // Shutdown.
     for (const auto tex : texture_names)
     {
-        if (tex) glDeleteTextures(1, &tex);
+        if (tex)
+            glDeleteTextures(1, &tex);
     }
     if (gamepad)
     {
@@ -1645,4 +1604,3 @@ int main(int argc, char** argv)
     SDL_Quit();
     return 0;
 }
-

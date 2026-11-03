@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <iostream>
+#include <print>
 
 #include "render/renderer.hpp"
 
@@ -134,15 +134,15 @@ bool debug_menu_input(s_debug_menu& menu, const s_event& event,
         if (label == "Stage" && has_stage && !stages.empty())
         {
             stage_index = (stage_index + 1) % stages.size();
-            std::cout << "Stage: " << stages[stage_index].m_names[0] << '\n';
+            std::println("Stage: {}", stages[stage_index].m_names[0]);
             return true;
         }
         if (label == "Motion" && has_motion && !motions.empty())
         {
             motion_clip_index = (motion_clip_index + 1) % motions.size();
             animation_time = 0.0f;
-            std::cout << "Motion clip " << motion_clip_index << ": "
-                << motions[motion_clip_index].m_name << '\n';
+            std::println("Motion clip {}: {}", motion_clip_index,
+                motions[motion_clip_index].m_name);
             return true;
         }
         if (label == "Show effect")

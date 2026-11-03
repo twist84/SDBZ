@@ -5,7 +5,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <iostream>
+#include <functional>
+#include <print>
+#include <span>
 #include <unordered_map>
 #include <vector>
 #include <fstream>
@@ -159,9 +161,8 @@ void render_stage_viewer(s_draw_context& ctx)
                     const_cast<s_camera&>(*ctx.camera).m_distance = std::max(extent * 0.6f, 0.1f);
                     const_cast<s_camera&>(*ctx.camera).m_pitch = -30.0f; // look down on the stage
                     const_cast<s_camera&>(*ctx.camera).m_yaw = -30.0f; // angled view of the stage
-                    std::cout << "Stage bbox: (" << lo[0] << "," << lo[1] << "," << lo[2] << ") to ("
-                        << hi[0] << "," << hi[1] << "," << hi[2] << ") distance="
-                        << ctx.camera->m_distance << '\n';
+std::println("Stage bbox: ({}, {}, {}) to ({}, {}, {}) distance={}",
+                       lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], ctx.camera->m_distance);
                 }
             }
 

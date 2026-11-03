@@ -1,5 +1,0 @@
-font_path before: C:\Dev\SuperDragonBallZ\assets\extracted\font\5-24-2.fon
-matched: font/5-24-2.fon
-offset=53381120 size=340192 game_data=732073984
-font_path after: C:\Dev\SuperDragonBallZ\assets\extracted\font\5-24-2.fon
-done

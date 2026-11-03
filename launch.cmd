@@ -1,4 +1,4 @@
 @echo off
 
-build-game\Release\sdbz_game.exe
+build-game\Debug\sdbz_game.exe
 

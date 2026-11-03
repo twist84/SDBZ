@@ -10,7 +10,7 @@ option(SDBZ_BUILD_GAME "Build the SDL3 game runtime when SDL3 is available" ON)
 option(SDBZ_FETCH_SDL3 "Fetch SDL3 when no system SDL3 package is available" ON)
 option(SDBZ_BUILD_TESTS "Build the native format tests" ON)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 

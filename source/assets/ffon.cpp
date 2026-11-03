@@ -2,8 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstring>
 #include <iostream>
+#include <cstring>
+#include <print>
 #include <span>
 #include <string_view>
 
@@ -11,7 +12,7 @@ bool load_ffon(const std::vector<std::uint8_t>& data, s_ffon_font& font)
 {
     if (data.size() < 0x40 || std::string_view(reinterpret_cast<const char*>(data.data()), 4) != "FFON")
     {
-        std::cerr << "Not an FFON data blob\\n";
+        std::println(std::cerr, "Not an FFON data blob");
         return false;
     }
 
@@ -47,8 +48,8 @@ bool load_ffon(const std::vector<std::uint8_t>& data, s_ffon_font& font)
         std::memcpy(font.glyphs[gi].data(), data.data() + offset, font.bytes_per_glyph);
     }
 
-    std::cout << "Loaded FFON font: " << glyph_count << " glyphs, "
-        << (int)width << "x" << (int)height << '\n';
+    std::println("Loaded FFON font: {} glyphs, {}x{}",
+        glyph_count, static_cast<int>(width), static_cast<int>(height));
     return true;
 }
 

@@ -5,7 +5,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <iostream>
+#include <functional>
+#include <print>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -208,10 +210,10 @@ void render_model_viewer(s_draw_context& ctx)
                     skinned_max[1] - skinned_min[1],
                     skinned_max[2] - skinned_min[2] });
                 const_cast<s_camera&>(*ctx.camera).m_distance = std::max(extent * 0.75f, 0.1f);
-                std::cout << "Skinned bbox: (" << skinned_min[0] << "," << skinned_min[1] << ","
-                    << skinned_min[2] << ") to (" << skinned_max[0] << "," << skinned_max[1] << ","
-                    << skinned_max[2] << ") extent=" << extent << " distance="
-                    << ctx.camera->m_distance << '\n';
+                std::print("Skinned bbox: ({},{},{}) to ({},{},{}) extent={} distance={}s\n",
+                    skinned_min[0], skinned_min[1], skinned_min[2],
+                    skinned_max[0], skinned_max[1], skinned_max[2], extent,
+                    ctx.camera->m_distance);
             }
         }
 
