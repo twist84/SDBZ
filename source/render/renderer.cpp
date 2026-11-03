@@ -17,6 +17,7 @@
 #include "render/stage_renderer.hpp"
 #include "interface/hud.hpp"
 #include "interface/vfs_overlay.hpp"
+#include "rasterizer/c_rasterizer.hpp"
 
 void render_frame(s_draw_context& ctx)
 {
@@ -25,10 +26,10 @@ void render_frame(s_draw_context& ctx)
     const int drawable_height = ctx.drawable_height;
     c_window* window = ctx.window;
 
-    glViewport(0, 0, drawable_width, drawable_height);
+    c_rasterizer::viewport(0, 0, drawable_width, drawable_height);
 
-    glClearColor(0.06f, 0.08f, 0.12f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    c_rasterizer::clear_color(0.06f, 0.08f, 0.12f, 1.0f);
+    c_rasterizer::clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // Apply camera.
     {
@@ -41,14 +42,14 @@ void render_frame(s_draw_context& ctx)
         const float top = view_size;
         const float z_near = -1.0e6f;
         const float z_far = 1.0e6f;
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glOrtho(left, right, bottom, top, z_near, z_far);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
-        glRotatef(-camera.m_pitch, 1.0f, 0.0f, 0.0f);
-        glRotatef(-camera.m_yaw, 0.0f, 1.0f, 0.0f);
-        glTranslatef(-camera.m_target[0], -camera.m_target[1], -camera.m_target[2]);
+        c_rasterizer::matrix_mode(GL_PROJECTION);
+        c_rasterizer::load_identity();
+        c_rasterizer::ortho(left, right, bottom, top, z_near, z_far);
+        c_rasterizer::matrix_mode(GL_MODELVIEW);
+        c_rasterizer::load_identity();
+        c_rasterizer::rotate(-camera.m_pitch, 1.0f, 0.0f, 0.0f);
+        c_rasterizer::rotate(-camera.m_yaw, 0.0f, 1.0f, 0.0f);
+        c_rasterizer::translate(-camera.m_target[0], -camera.m_target[1], -camera.m_target[2]);
     }
 
     render_model_viewer(ctx);
@@ -57,8 +58,8 @@ void render_frame(s_draw_context& ctx)
     // ---- Image viewer ----
     if (ctx.has_image && ctx.image && !ctx.has_textures)
     {
-        glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D, upload_texture(*ctx.image));
+        c_rasterizer::enable(GL_TEXTURE_2D);
+        c_rasterizer::bind_texture(GL_TEXTURE_2D, upload_texture(*ctx.image));
 
         const float scale = std::min(
             static_cast<float>(drawable_width) / static_cast<float>(ctx.image->width),
@@ -68,21 +69,21 @@ void render_frame(s_draw_context& ctx)
         const float draw_x = (static_cast<float>(drawable_width) - draw_width) * 0.5f;
         const float draw_y = (static_cast<float>(drawable_height) - draw_height) * 0.5f;
 
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        glOrtho(0, drawable_width, drawable_height, 0, -1, 1);
-        glMatrixMode(GL_MODELVIEW);
-        glLoadIdentity();
+        c_rasterizer::matrix_mode(GL_PROJECTION);
+        c_rasterizer::load_identity();
+        c_rasterizer::ortho(0, drawable_width, drawable_height, 0, -1, 1);
+        c_rasterizer::matrix_mode(GL_MODELVIEW);
+        c_rasterizer::load_identity();
 
-        glColor3f(1.0f, 1.0f, 1.0f);
-        glBegin(GL_QUADS);
-        glTexCoord2f(0.0f, 0.0f); glVertex2f(draw_x, draw_y);
-        glTexCoord2f(1.0f, 0.0f); glVertex2f(draw_x + draw_width, draw_y);
-        glTexCoord2f(1.0f, 1.0f); glVertex2f(draw_x + draw_width, draw_y + draw_height);
-        glTexCoord2f(0.0f, 1.0f); glVertex2f(draw_x, draw_y + draw_height);
-        glEnd();
-        glDisable(GL_TEXTURE_2D);
-        glDisable(GL_LIGHTING);
+        c_rasterizer::color3f(1.0f, 1.0f, 1.0f);
+        c_rasterizer::begin(GL_QUADS);
+        c_rasterizer::tex_coord2f(0.0f, 0.0f); c_rasterizer::vertex2f(draw_x, draw_y);
+        c_rasterizer::tex_coord2f(1.0f, 0.0f); c_rasterizer::vertex2f(draw_x + draw_width, draw_y);
+        c_rasterizer::tex_coord2f(1.0f, 1.0f); c_rasterizer::vertex2f(draw_x + draw_width, draw_y + draw_height);
+        c_rasterizer::tex_coord2f(0.0f, 1.0f); c_rasterizer::vertex2f(draw_x, draw_y + draw_height);
+        c_rasterizer::end();
+        c_rasterizer::disable(GL_TEXTURE_2D);
+        c_rasterizer::disable(GL_LIGHTING);
     }
 
     draw_hud(ctx);

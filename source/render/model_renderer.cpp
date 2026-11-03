@@ -10,33 +10,34 @@
 #include <vector>
 
 #include "rasterizer/math_helpers.hpp"
+#include "rasterizer/c_rasterizer.hpp"
 
 namespace
 {
     void setup_model_lighting()
     {
-        glEnable(GL_LIGHTING);
-        glEnable(GL_NORMALIZE);
-        glEnable(GL_LIGHT0);
-        glEnable(GL_LIGHT1);
-        glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
-        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
-        glEnable(GL_COLOR_MATERIAL);
+        c_rasterizer::enable(GL_LIGHTING);
+        c_rasterizer::enable(GL_NORMALIZE);
+        c_rasterizer::enable(GL_LIGHT0);
+        c_rasterizer::enable(GL_LIGHT1);
+        c_rasterizer::light_modeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
+        c_rasterizer::color_material(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+        c_rasterizer::enable(GL_COLOR_MATERIAL);
 
         GLfloat ambient[] = { 0.7f, 0.7f, 0.7f, 1.0f };
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
+        c_rasterizer::light_modelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
 
         GLfloat l0_pos[] = { 5.0f, 10.0f, 5.0f, 0.0f };
-        glLightfv(GL_LIGHT0, GL_POSITION, l0_pos);
+        c_rasterizer::light_fv(GL_LIGHT0, GL_POSITION, l0_pos);
         GLfloat l0_diff[] = { 0.9f, 0.9f, 0.9f, 1.0f };
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, l0_diff);
+        c_rasterizer::light_fv(GL_LIGHT0, GL_DIFFUSE, l0_diff);
         GLfloat l0_spec[] = { 0.2f, 0.2f, 0.2f, 1.0f };
-        glLightfv(GL_LIGHT0, GL_SPECULAR, l0_spec);
+        c_rasterizer::light_fv(GL_LIGHT0, GL_SPECULAR, l0_spec);
 
         GLfloat l1_pos[] = { -5.0f, 2.0f, -5.0f, 0.0f };
-        glLightfv(GL_LIGHT1, GL_POSITION, l1_pos);
+        c_rasterizer::light_fv(GL_LIGHT1, GL_POSITION, l1_pos);
         GLfloat l1_diff[] = { 0.5f, 0.5f, 0.5f, 1.0f };
-        glLightfv(GL_LIGHT1, GL_DIFFUSE, l1_diff);
+        c_rasterizer::light_fv(GL_LIGHT1, GL_DIFFUSE, l1_diff);
     }
 
     bool material_is_transparent(const sdbz::s_model_material& mat)
@@ -322,14 +323,14 @@ void render_model_viewer(s_draw_context& ctx)
             }
             if (has_texture)
             {
-                glEnable(GL_TEXTURE_2D);
-                glBindTexture(GL_TEXTURE_2D, tex);
+                c_rasterizer::enable(GL_TEXTURE_2D);
+                c_rasterizer::bind_texture(GL_TEXTURE_2D, tex);
             }
             else
             {
-                glDisable(GL_TEXTURE_2D);
+                c_rasterizer::disable(GL_TEXTURE_2D);
             }
-            glBegin(GL_TRIANGLES);
+            c_rasterizer::begin(GL_TRIANGLES);
             const std::int32_t rigid_node = mesh.m_rigid_node_index;
             for (std::uint32_t idx : p.m_indices)
             {
@@ -337,46 +338,46 @@ void render_model_viewer(s_draw_context& ctx)
                 const auto& v = mesh.m_vertices[idx];
                 const auto sp = skin_position(v.m_position, v, rigid_node,
                     inverse_bind, world, ctx.model->m_nodes);
-                glNormal3f(v.m_normal[0], v.m_normal[1], v.m_normal[2]);
+                c_rasterizer::normal3f(v.m_normal[0], v.m_normal[1], v.m_normal[2]);
                 if (v.m_has_colour)
                 {
-                    glColor4f(v.m_colour[0], v.m_colour[1], v.m_colour[2], v.m_colour[3]);
+                    c_rasterizer::color4f(v.m_colour[0], v.m_colour[1], v.m_colour[2], v.m_colour[3]);
                 }
-                if (has_texture) glTexCoord2f(v.m_uv[0], v.m_uv[1]);
-                glVertex3f(sp[0], sp[1], sp[2]);
+                if (has_texture) c_rasterizer::tex_coord2f(v.m_uv[0], v.m_uv[1]);
+                c_rasterizer::vertex3f(sp[0], sp[1], sp[2]);
             }
-            glEnd();
+            c_rasterizer::end();
             if (has_texture)
             {
-                glDisable(GL_TEXTURE_2D);
+                c_rasterizer::disable(GL_TEXTURE_2D);
             }
         };
 
         // Opaque pass: depth writes on, no blending. Alpha test discards cutout
         // foliage holes so opaque parts still write depth for correct zbuffer.
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
-        glEnable(GL_ALPHA_TEST);
-        glAlphaFunc(GL_GREATER, 0.5f);
-        glColor3f(1.0f, 1.0f, 1.0f);
+        c_rasterizer::depth_mask(GL_TRUE);
+        c_rasterizer::disable(GL_BLEND);
+        c_rasterizer::enable(GL_ALPHA_TEST);
+        c_rasterizer::alpha_func(GL_GREATER, 0.5f);
+        c_rasterizer::color3f(1.0f, 1.0f, 1.0f);
         for (const auto& e : opaque)
         {
             draw_primitive(e);
         }
-        glDisable(GL_ALPHA_TEST);
+        c_rasterizer::disable(GL_ALPHA_TEST);
 
         // Transparent pass: depth writes off, alpha blending on, back-to-front.
-        glDepthMask(GL_FALSE);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        c_rasterizer::depth_mask(GL_FALSE);
+        c_rasterizer::enable(GL_BLEND);
+        c_rasterizer::blend_func(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         for (const auto& e : transparent)
         {
             draw_primitive(e);
         }
 
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
-        glDisable(GL_LIGHTING);
+        c_rasterizer::depth_mask(GL_TRUE);
+        c_rasterizer::disable(GL_BLEND);
+        c_rasterizer::disable(GL_LIGHTING);
     }
 
 }

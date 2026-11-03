@@ -89,6 +89,7 @@ if(SDBZ_BUILD_GAME)
             source/assets/discovery.cpp
             source/interface/part_groups.cpp
             source/interface/debug_menu/debug_menu.cpp
+            source/rasterizer/c_rasterizer.cpp
             source/rasterizer/math_helpers.cpp
             source/rasterizer/gl_helpers.cpp
             source/render/model_renderer.cpp

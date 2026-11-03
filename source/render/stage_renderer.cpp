@@ -11,6 +11,7 @@
 
 #include "rasterizer/gl_helpers.hpp"
 #include "rasterizer/math_helpers.hpp"
+#include "rasterizer/c_rasterizer.hpp"
 
 namespace
 {
@@ -19,28 +20,28 @@ namespace
     // modulate, plus a fill light from the opposite side.
     void setup_stage_lighting()
     {
-        glEnable(GL_LIGHTING);
-        glEnable(GL_NORMALIZE);
-        glEnable(GL_LIGHT0);
-        glEnable(GL_LIGHT1);
-        glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
-        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
-        glEnable(GL_COLOR_MATERIAL);
+        c_rasterizer::enable(GL_LIGHTING);
+        c_rasterizer::enable(GL_NORMALIZE);
+        c_rasterizer::enable(GL_LIGHT0);
+        c_rasterizer::enable(GL_LIGHT1);
+        c_rasterizer::light_modeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);
+        c_rasterizer::color_material(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+        c_rasterizer::enable(GL_COLOR_MATERIAL);
 
         GLfloat ambient[] = { 0.7f, 0.7f, 0.7f, 1.0f };
-        glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
+        c_rasterizer::light_modelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
 
         GLfloat l0_pos[] = { 0.3f, 1.0f, 0.5f, 0.0f };
-        glLightfv(GL_LIGHT0, GL_POSITION, l0_pos);
+        c_rasterizer::light_fv(GL_LIGHT0, GL_POSITION, l0_pos);
         GLfloat l0_diff[] = { 0.9f, 0.9f, 0.9f, 1.0f };
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, l0_diff);
+        c_rasterizer::light_fv(GL_LIGHT0, GL_DIFFUSE, l0_diff);
         GLfloat l0_spec[] = { 0.2f, 0.2f, 0.2f, 1.0f };
-        glLightfv(GL_LIGHT0, GL_SPECULAR, l0_spec);
+        c_rasterizer::light_fv(GL_LIGHT0, GL_SPECULAR, l0_spec);
 
         GLfloat l1_pos[] = { -0.7f, 0.2f, -0.5f, 0.0f };
-        glLightfv(GL_LIGHT1, GL_POSITION, l1_pos);
+        c_rasterizer::light_fv(GL_LIGHT1, GL_POSITION, l1_pos);
         GLfloat l1_diff[] = { 0.5f, 0.5f, 0.5f, 1.0f };
-        glLightfv(GL_LIGHT1, GL_DIFFUSE, l1_diff);
+        c_rasterizer::light_fv(GL_LIGHT1, GL_DIFFUSE, l1_diff);
     }
 
     bool material_is_transparent(const sdbz::s_model_material& mat)
@@ -229,44 +230,44 @@ void render_stage_viewer(s_draw_context& ctx)
             // Opaque pass: depth writes on, no blending. Alpha test discards
             // cutout foliage holes so they don't write depth, while opaque parts
             // still write depth for correct zbuffer ordering.
-            glDepthMask(GL_TRUE);
-            glDisable(GL_BLEND);
-            glDisable(GL_TEXTURE_2D);
-            glEnable(GL_ALPHA_TEST);
-            glAlphaFunc(GL_GREATER, 0.5f);
-            glColor3f(1.0f, 1.0f, 1.0f);
+            c_rasterizer::depth_mask(GL_TRUE);
+            c_rasterizer::disable(GL_BLEND);
+            c_rasterizer::disable(GL_TEXTURE_2D);
+            c_rasterizer::enable(GL_ALPHA_TEST);
+            c_rasterizer::alpha_func(GL_GREATER, 0.5f);
+            c_rasterizer::color3f(1.0f, 1.0f, 1.0f);
             for (const auto& e : opaque)
             {
-                glPushMatrix();
+                c_rasterizer::push_matrix();
                 gl_mult_matrix(e.world);
-                glCallList((*ctx.stage_mesh_lists)[ctx.stage_index][e.mesh_index]);
-                glPopMatrix();
+                c_rasterizer::call_list((*ctx.stage_mesh_lists)[ctx.stage_index][e.mesh_index]);
+                c_rasterizer::pop_matrix();
             }
-            glDisable(GL_ALPHA_TEST);
+            c_rasterizer::disable(GL_ALPHA_TEST);
 
             // Transparent pass: depth writes off, alpha blending on, back-to-front.
-            glDepthMask(GL_FALSE);
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            c_rasterizer::depth_mask(GL_FALSE);
+            c_rasterizer::enable(GL_BLEND);
+            c_rasterizer::blend_func(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             for (const auto& e : transparent)
             {
-                glPushMatrix();
+                c_rasterizer::push_matrix();
                 gl_mult_matrix(e.world);
-                glCallList((*ctx.stage_mesh_lists)[ctx.stage_index][e.mesh_index]);
-                glPopMatrix();
+                c_rasterizer::call_list((*ctx.stage_mesh_lists)[ctx.stage_index][e.mesh_index]);
+                c_rasterizer::pop_matrix();
             }
 
-            glDepthMask(GL_TRUE);
-            glDisable(GL_BLEND);
-            glDisable(GL_LIGHTING);
+            c_rasterizer::depth_mask(GL_TRUE);
+            c_rasterizer::disable(GL_BLEND);
+            c_rasterizer::disable(GL_LIGHTING);
         }
         else
         {
             // No model: draw the node hierarchy.
-            glDisable(GL_LIGHTING);
-            glDisable(GL_TEXTURE_2D);
-            glColor3f(0.0f, 1.0f, 0.0f);
-            glBegin(GL_LINES);
+            c_rasterizer::disable(GL_LIGHTING);
+            c_rasterizer::disable(GL_TEXTURE_2D);
+            c_rasterizer::color3f(0.0f, 1.0f, 0.0f);
+            c_rasterizer::begin(GL_LINES);
             const std::vector<std::vector<sdbz::mat4>>* stage_worlds = ctx.stage_worlds;
             for (std::size_t ni = 0; ni < stage_nodes.size(); ++ni)
             {
@@ -275,18 +276,18 @@ void render_stage_viewer(s_draw_context& ctx)
                 const auto& p = (*stage_worlds)[ctx.stage_index][
                     static_cast<std::size_t>(node.m_parent)];
                 const auto& c = (*stage_worlds)[ctx.stage_index][ni];
-                glVertex3f(p[3], p[7], p[11]);
-                glVertex3f(c[3], c[7], c[11]);
+                c_rasterizer::vertex3f(p[3], p[7], p[11]);
+                c_rasterizer::vertex3f(c[3], c[7], c[11]);
             }
-            glEnd();
+            c_rasterizer::end();
         }
 
         if (ctx.show_collision && ctx.has_stage_hit && ctx.stage_hits &&
             ctx.stage_index < ctx.stage_hits->size())
         {
-            glDisable(GL_LIGHTING);
-            glDisable(GL_TEXTURE_2D);
-            glColor3f(0.1f, 1.0f, 0.3f);
+            c_rasterizer::disable(GL_LIGHTING);
+            c_rasterizer::disable(GL_TEXTURE_2D);
+            c_rasterizer::color3f(0.1f, 1.0f, 0.3f);
             const std::vector<std::vector<sdbz::mat4>>* stage_worlds = ctx.stage_worlds;
             const std::unordered_map<std::string, std::size_t>* hit_by_names =
                 ctx.stage_hit_by_names ? &(*ctx.stage_hit_by_names)[ctx.stage_index] : nullptr;
@@ -294,9 +295,9 @@ void render_stage_viewer(s_draw_context& ctx)
             {
                 const auto& node = stage_nodes[ni];
                 if (node.m_kind != 3 || !group_visible(ni)) continue;
-                glPushMatrix();
+                c_rasterizer::push_matrix();
                 gl_mult_matrix((*stage_worlds)[ctx.stage_index][ni]);
-                glBegin(GL_LINES);
+                c_rasterizer::begin(GL_LINES);
                 for (const auto& reference : node.m_references)
                 {
                     if (!hit_by_names) continue;
@@ -321,15 +322,15 @@ void render_stage_viewer(s_draw_context& ctx)
                                 b >= (*ctx.stage_hits)[ctx.stage_index].m_vertices.size()) continue;
                             const auto& pa = (*ctx.stage_hits)[ctx.stage_index].m_vertices[a].m_position;
                             const auto& pb = (*ctx.stage_hits)[ctx.stage_index].m_vertices[b].m_position;
-                            glVertex3f(pa[0], pa[1], pa[2]);
-                            glVertex3f(pb[0], pb[1], pb[2]);
+                            c_rasterizer::vertex3f(pa[0], pa[1], pa[2]);
+                            c_rasterizer::vertex3f(pb[0], pb[1], pb[2]);
                         }
                     }
-                    glEnd();
-                    glPopMatrix();
+                    c_rasterizer::end();
+                    c_rasterizer::pop_matrix();
                 }
             }
-            glEnable(GL_LIGHTING);
+            c_rasterizer::enable(GL_LIGHTING);
         }
     }
 

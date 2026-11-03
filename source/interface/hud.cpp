@@ -8,6 +8,7 @@
 #include <string>
 
 #include "rasterizer/gl_helpers.hpp"
+#include "rasterizer/c_rasterizer.hpp"
 
 void draw_hud(s_draw_context& ctx)
 {

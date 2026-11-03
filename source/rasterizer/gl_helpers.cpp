@@ -8,6 +8,7 @@
 #include <string>
 
 #include "assets/assets.hpp"
+#include "rasterizer/c_rasterizer.hpp"
 
 void upload_glyph_textures(const s_ffon_font& font, std::vector<GLuint>& glyph_textures)
 {
@@ -20,12 +21,12 @@ void upload_glyph_textures(const s_ffon_font& font, std::vector<GLuint>& glyph_t
         const std::uint8_t row_stride = font.bytes_per_row;
 
         GLuint tex = 0;
-        glGenTextures(1, &tex);
-        glBindTexture(GL_TEXTURE_2D, tex);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        c_rasterizer::gen_textures(1, &tex);
+        c_rasterizer::bind_texture(GL_TEXTURE_2D, tex);
+        c_rasterizer::tex_parameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        c_rasterizer::tex_parameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        c_rasterizer::tex_parameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        c_rasterizer::tex_parameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
         std::vector<std::uint8_t> rgba(width * height * 4);
         for (std::uint32_t y = 0; y < height; ++y)
@@ -42,7 +43,7 @@ void upload_glyph_textures(const s_ffon_font& font, std::vector<GLuint>& glyph_t
                 rgba[base + 3] = intensity;
             }
         }
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+        c_rasterizer::tex_image_2d(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
             GL_UNSIGNED_BYTE, rgba.data());
         glyph_textures[gi] = tex;
     }
@@ -50,43 +51,43 @@ void upload_glyph_textures(const s_ffon_font& font, std::vector<GLuint>& glyph_t
 
 void begin_2d(int width, int height)
 {
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    glOrtho(0.0, width, height, 0.0, -1.0, 1.0);
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_LIGHTING);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    c_rasterizer::matrix_mode(GL_PROJECTION);
+    c_rasterizer::push_matrix();
+    c_rasterizer::load_identity();
+    c_rasterizer::ortho(0.0, width, height, 0.0, -1.0, 1.0);
+    c_rasterizer::matrix_mode(GL_MODELVIEW);
+    c_rasterizer::push_matrix();
+    c_rasterizer::load_identity();
+    c_rasterizer::disable(GL_DEPTH_TEST);
+    c_rasterizer::disable(GL_LIGHTING);
+    c_rasterizer::enable(GL_BLEND);
+    c_rasterizer::blend_func(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    c_rasterizer::tex_envi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 }
 
 void end_2d()
 {
-    glDisable(GL_BLEND);
-    glEnable(GL_DEPTH_TEST);
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
+    c_rasterizer::disable(GL_BLEND);
+    c_rasterizer::enable(GL_DEPTH_TEST);
+    c_rasterizer::matrix_mode(GL_PROJECTION);
+    c_rasterizer::pop_matrix();
+    c_rasterizer::matrix_mode(GL_MODELVIEW);
+    c_rasterizer::pop_matrix();
 }
 
 void draw_glyph(GLuint tex, float x, float y, float w, float h,
     std::uint8_t r, std::uint8_t g, std::uint8_t b)
 {
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glColor3f(r / 255.0f, g / 255.0f, b / 255.0f);
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.0f, 0.0f); glVertex2f(x, y);
-    glTexCoord2f(1.0f, 0.0f); glVertex2f(x + w, y);
-    glTexCoord2f(1.0f, 1.0f); glVertex2f(x + w, y + h);
-    glTexCoord2f(0.0f, 1.0f); glVertex2f(x, y + h);
-    glEnd();
-    glDisable(GL_TEXTURE_2D);
+    c_rasterizer::enable(GL_TEXTURE_2D);
+    c_rasterizer::bind_texture(GL_TEXTURE_2D, tex);
+    c_rasterizer::color3f(r / 255.0f, g / 255.0f, b / 255.0f);
+    c_rasterizer::begin(GL_QUADS);
+    c_rasterizer::tex_coord2f(0.0f, 0.0f); c_rasterizer::vertex2f(x, y);
+    c_rasterizer::tex_coord2f(1.0f, 0.0f); c_rasterizer::vertex2f(x + w, y);
+    c_rasterizer::tex_coord2f(1.0f, 1.0f); c_rasterizer::vertex2f(x + w, y + h);
+    c_rasterizer::tex_coord2f(0.0f, 1.0f); c_rasterizer::vertex2f(x, y + h);
+    c_rasterizer::end();
+    c_rasterizer::disable(GL_TEXTURE_2D);
 }
 
 void draw_text(const std::string& text, float x, float y, float scale,
@@ -124,15 +125,15 @@ void gl_mult_matrix(const sdbz::mat4& m)
         m[1], m[5], m[9],  m[13],
         m[2], m[6], m[10], m[14],
         m[3], m[7], m[11], m[15] };
-    glMultMatrixf(column_major);
+    c_rasterizer::mult_matrix(column_major);
 }
 
 GLuint compile_static_mesh_list(const sdbz::s_model& model,
     const sdbz::s_model_mesh& mesh,
     const std::vector<GLuint>& textures)
 {
-    const GLuint list = glGenLists(1);
-    glNewList(list, GL_COMPILE);
+    const GLuint list = c_rasterizer::gen_lists(1);
+    c_rasterizer::new_list(list, GL_COMPILE);
     for (const auto& primitive : mesh.m_primitives)
     {
         if (primitive.m_indices.size() < 3) continue;
@@ -152,14 +153,14 @@ GLuint compile_static_mesh_list(const sdbz::s_model& model,
         }
         if (has_texture)
         {
-            glEnable(GL_TEXTURE_2D);
-            glBindTexture(GL_TEXTURE_2D, tex);
+            c_rasterizer::enable(GL_TEXTURE_2D);
+            c_rasterizer::bind_texture(GL_TEXTURE_2D, tex);
         }
         else
         {
-            glDisable(GL_TEXTURE_2D);
+            c_rasterizer::disable(GL_TEXTURE_2D);
         }
-        glBegin(GL_TRIANGLES);
+        c_rasterizer::begin(GL_TRIANGLES);
         for (std::size_t i = 0; i + 2 < primitive.m_indices.size(); i += 3)
         {
             for (int k = 0; k < 3; ++k)
@@ -167,14 +168,14 @@ GLuint compile_static_mesh_list(const sdbz::s_model& model,
                 const std::uint32_t idx = primitive.m_indices[i + k];
                 if (idx >= mesh.m_vertices.size()) continue;
                 const auto& v = mesh.m_vertices[idx];
-                glNormal3f(v.m_normal[0], v.m_normal[1], v.m_normal[2]);
-                if (has_texture) glTexCoord2f(v.m_uv[0], v.m_uv[1]);
-                glVertex3f(v.m_position[0], v.m_position[1], v.m_position[2]);
+                c_rasterizer::normal3f(v.m_normal[0], v.m_normal[1], v.m_normal[2]);
+                if (has_texture) c_rasterizer::tex_coord2f(v.m_uv[0], v.m_uv[1]);
+                c_rasterizer::vertex3f(v.m_position[0], v.m_position[1], v.m_position[2]);
             }
         }
-        glEnd();
-        if (has_texture) glDisable(GL_TEXTURE_2D);
+        c_rasterizer::end();
+        if (has_texture) c_rasterizer::disable(GL_TEXTURE_2D);
     }
-    glEndList();
+    c_rasterizer::end_list();
     return list;
 }
