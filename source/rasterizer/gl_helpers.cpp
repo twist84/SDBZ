@@ -112,6 +112,13 @@ void draw_text(const std::string& text, float x, float y, float scale,
         if (glyph_id == 0 || static_cast<std::size_t>(glyph_id) > glyph_textures.size()) continue;
         const auto [left, right] = glyph_ink_bounds(font, font.glyphs[glyph_id - 1]);
         if (right <= left) continue;
+        // Drop shadow: render the glyph in black, offset slightly down-right.
+        constexpr float k_shadow_offset = 1.0f;
+        draw_glyph(glyph_textures[glyph_id - 1],
+            cursor_x - left * scale + k_shadow_offset,
+            top + k_shadow_offset,
+            static_cast<float>(font.width) * scale,
+            static_cast<float>(font.height) * scale, 0, 0, 0);
         draw_glyph(glyph_textures[glyph_id - 1], cursor_x - left * scale, top,
             static_cast<float>(font.width) * scale, static_cast<float>(font.height) * scale, r, g, b);
         cursor_x += ((right - left) + k_spacing) * scale;

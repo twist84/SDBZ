@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -951,6 +952,8 @@ int main(int argc, char** argv)
                                         sdbz::s_stage stg = sdbz::parse_stg(entry_data);
 
                                         // Find companion files in the archive by stem name.
+                                        // Archive entries may carry path prefixes (e.g.
+                                        // "stg/s00/s00a.mdl") so match by stem suffix.
                                         auto find_archive_entry = [&](const char* extension)
                                             -> const sdbz::s_archive_entry*
                                         {
@@ -959,8 +962,14 @@ int main(int argc, char** argv)
                                             for (const auto& candidate :
                                                 loaded_archive.m_entries)
                                             {
-                                                if (lower_copy(
-                                                    candidate.m_name_cp932) == target)
+                                                const std::string name =
+                                                    lower_copy(
+                                                        candidate.m_name_cp932);
+                                                if (name == target ||
+                                                    (name.size() >= target.size() &&
+                                                     name.compare(
+                                                        name.size() - target.size(),
+                                                        target.size(), target) == 0))
                                                 {
                                                     return &candidate;
                                                 }
@@ -969,6 +978,7 @@ int main(int argc, char** argv)
                                         };
 
                                         // Stage model (.mdl).
+                                        stage_meshes_by_names.emplace_back();
                                         const auto* model_entry = find_archive_entry(".mdl");
                                         if (model_entry)
                                         {
@@ -1011,6 +1021,7 @@ int main(int argc, char** argv)
                                         const auto* hit_entry = find_archive_entry(".hit");
                                         if (hit_entry)
                                         {
+                                            stage_hit_by_names.emplace_back();
                                             const std::uint64_t hoffset = hit_entry->offset();
                                             const std::uint64_t hsize = hit_entry->m_byte_size;
                                             if (hoffset + hsize <= game_data.size())
@@ -1051,6 +1062,30 @@ int main(int argc, char** argv)
                                                 static_cast<std::size_t>(
                                                     pix_entry - loaded_archive.m_entries.data());
                                             stage_pix_entry_indices.push_back(pix_index);
+                                            try
+                                            {
+                                                const auto& pix_entry_ref = loaded_archive.m_entries[pix_index];
+                                                const std::uint64_t pix_offset = pix_entry_ref.offset();
+                                                const std::uint64_t pix_byte_size = pix_entry_ref.m_byte_size;
+                                                if (pix_offset + pix_byte_size <= game_data.size())
+                                                {
+                                                    const std::span<const std::uint8_t> pix_data(
+                                                        game_data.data() + pix_offset, pix_byte_size);
+                                                    stage_textures.back() = load_fpix_textures(
+                                                        std::vector<std::uint8_t>(
+                                                            pix_data.begin(), pix_data.end()));
+                                                    stage_textures_loaded.back() =
+                                                        !stage_textures.back().empty();
+                                                    std::cout << "Loaded stage textures from archive: "
+                                                        << pix_entry_ref.m_name_cp932 << ": "
+                                                        << stage_textures.back().size() << " textures\\n";
+                                                }
+                                            }
+                                            catch (const std::exception& exception)
+                                            {
+                                                std::cerr << "Archive stage texture load failed: "
+                                                    << exception.what() << '\n';
+                                            }
                                         }
                                         else
                                         {
@@ -1061,8 +1096,6 @@ int main(int argc, char** argv)
                                         loaded_stages.push_back(std::move(stg));
                                         stage_worlds.emplace_back();
                                         stage_groups.emplace_back();
-                                        stage_meshes_by_names.emplace_back();
-                                        stage_hit_by_names.emplace_back();
                                         stage_mesh_lists.emplace_back();
 
                                         // Compute world transforms for the new stage.
@@ -1144,6 +1177,7 @@ int main(int argc, char** argv)
 
                                         has_loaded_stage = true;
                                         loaded_stage_index = loaded_stages.size() - 1;
+                                        camera.m_framed = false; // reframe on the newly loaded stage
                                         std::cout << "Loaded stage from archive: " << name
                                             << " (" << loaded_stages.back().m_nodes.size()
                                             << " nodes)\n";
@@ -1429,7 +1463,11 @@ int main(int argc, char** argv)
 
         // Update per-frame context fields.
         window.get_size_pixels(ctx.drawable_width, ctx.drawable_height);
+        ctx.stages = has_loaded_stage ? &loaded_stages : nullptr;
+        ctx.has_stage = has_loaded_stage;
         ctx.stage_index = loaded_stage_index;
+        ctx.has_stage_model = has_stage_model;
+        ctx.has_stage_hit = has_stage_hit;
         ctx.motion_clip_index = motion_clip_index;
         ctx.show_effect = show_effect;
         ctx.show_collision = show_collision;

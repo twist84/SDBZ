@@ -107,6 +107,21 @@ if(SDBZ_BUILD_GAME)
         else()
             target_compile_options(sdbz_game PRIVATE -Wall -Wextra -Wpedantic -Werror)
         endif()
+        # Copy the SDL3 shared library DLL next to the executable so the game
+        # can find it at runtime in both Debug and Release builds.
+        if(WIN32 AND TARGET SDL3::SDL3)
+            add_custom_command(TARGET sdbz_game POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "$<TARGET_FILE:SDL3::SDL3>"
+                    "$<TARGET_FILE_DIR:sdbz_game>")
+        endif()
+
+        # Make sdbz_game the Visual Studio startup project and debug from the
+        # source root so relative asset paths resolve correctly.
+        set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT sdbz_game)
+        set_target_properties(sdbz_game PROPERTIES
+            DEBUGGER_WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        )
     else()
         message(WARNING
             "SDL3 was not found. Building sdbz_tool and sdbz_tests only. "

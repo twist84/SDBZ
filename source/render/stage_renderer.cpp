@@ -8,6 +8,7 @@
 #include <iostream>
 #include <unordered_map>
 #include <vector>
+#include <fstream>
 
 #include "rasterizer/gl_helpers.hpp"
 #include "rasterizer/math_helpers.hpp"

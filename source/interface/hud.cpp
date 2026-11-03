@@ -16,7 +16,7 @@ void draw_hud(s_draw_context& ctx)
     const int drawable_height = ctx.drawable_height;
     const s_camera& camera = *ctx.camera;
     // ---- HUD text ----
-    if (!ctx.debug.open && ctx.has_font && ctx.font && ctx.glyph_textures)
+    if (!ctx.debug.open && !ctx.vfs_open && ctx.has_font && ctx.font && ctx.glyph_textures)
     {
         begin_2d(drawable_width, drawable_height);
 
