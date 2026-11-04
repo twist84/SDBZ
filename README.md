@@ -112,7 +112,18 @@ found. Controls:
 | H | Toggle transformed HIT polygons and player capsule diagnostics |
 | Gamepad left stick | Move |
 | Gamepad left shoulder | Run |
-| Gamepad South (A on Xbox) | Jump |
+| Gamepad South (A on Xbox), outside menus | Jump |
+| Gamepad Select + Start | Open / close the debug menu (or close the VFS browser) |
+| Gamepad D-pad up / down | Move through debug-menu or VFS entries |
+| Gamepad D-pad left / right | Change the selected debug-menu value; in VFS, go to parent / open entry |
+| Gamepad South (A on Xbox), while a menu is open | Select a debug-menu or VFS entry |
+| Gamepad East (B on Xbox) | Go back one menu / VFS directory level; close at the root |
+
+The debug menu and archive VFS browser are fully navigable without a keyboard.
+In the debug menu, D-pad left/right selects the previous/next stage or motion
+clip, and sets the selected visibility toggle off/on. In the VFS browser,
+D-pad left/right goes to the parent directory / opens the selected directory or
+file. Keyboard navigation remains available.
 
 The gameplay camera is independent of the stage viewer camera. It uses perspective
 projection and a signed orbit distance; a negative value moves the camera to the

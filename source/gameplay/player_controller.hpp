@@ -25,18 +25,20 @@ namespace sdbz
         std::string m_ground_object_name;
         float m_yaw_degrees = 0.0f;
         float m_ground_height = 0.0f;
-        float m_walk_speed = 4.0f;
-        float m_run_speed = 7.0f;
+        float m_walk_speed = 8.0f;
+        float m_run_speed = 14.0f;
         float m_jump_speed = 7.5f;
-        float m_gravity = 22.0f;
-        float m_acceleration = 28.0f;
-        float m_deceleration = 32.0f;
+        float m_gravity = 28.0f;
+        float m_acceleration = 36.0f;
+        float m_deceleration = 42.0f;
         float m_collision_foot_offset = 0.05f;
-        float m_collision_capsule_radius = 0.35f;
+        float m_collision_capsule_radius = 0.25f;
         float m_collision_capsule_height = 1.75f;
-        float m_collision_step_height = 0.35f;
+        // At run speed, one fixed 60 Hz tick climbs about 0.40 world units
+        // on a 60-degree ramp. Keep the step allowance slightly above that.
+        float m_collision_step_height = 0.42f;
         float m_collision_step_down = 0.65f;
-        float m_max_walkable_slope_degrees = 50.0f;
+        float m_max_walkable_slope_degrees = 60.0f;
         bool m_grounded = true;
         bool m_running = false;
         bool m_landed_this_frame = false;

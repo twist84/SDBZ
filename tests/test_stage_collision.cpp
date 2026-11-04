@@ -84,6 +84,51 @@ int main()
     require(!sdbz::query_stage_ground(collision, 20.0f, 20.0f, 2.0f),
         "ground query rejects points outside collision polygon");
 
+    // Only HIT nodes under the STAGE root are playable. A floor stored under a
+    // template or EFFECT root (kept near the origin, never placed in the arena)
+    // must not enter the collision world or become the spawn surface.
+    {
+        sdbz::s_stage rooted;
+        const auto add_node = [&](std::uint32_t index, std::uint8_t kind,
+            std::int32_t parent, const char* name, bool with_ref)
+        {
+            sdbz::s_stage_node node;
+            node.m_index = index;
+            node.m_kind = kind;
+            node.m_parent = parent;
+            node.m_name = name;
+            if (with_ref) node.m_references.push_back({ 0, 0, "floor" });
+            rooted.m_nodes.push_back(node);
+        };
+        add_node(0, 0, -1, "template_root", false);
+        add_node(1, 3, 0, "template_floor", true);
+        add_node(2, 0, -1, "EFFECT", false);
+        add_node(3, 3, 2, "effect_floor", true);
+        add_node(4, 0, -1, "STAGE", false);
+        add_node(5, 3, 4, "stage_floor", true);
+        rooted.m_template_root_count = 1;
+        rooted.m_roots = { 0, 2, 4 };
+        rooted.m_effect_root = 2;
+        rooted.m_stage_root = 4;
+        std::vector<sdbz::mat4> rooted_worlds;
+        for (std::size_t i = 0; i < rooted.m_nodes.size(); ++i)
+        {
+            const float y = (i == 5) ? 30.0f : 1.5f;
+            rooted_worlds.push_back(sdbz::trs_matrix({ 0.0f, y, 0.0f },
+                { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }));
+        }
+        const auto rooted_world = sdbz::build_stage_collision_world(
+            rooted, hit, rooted_worlds);
+        require(rooted_world.m_polygons.size() == 1,
+            "template and EFFECT HIT nodes are excluded from the collision world");
+        require(std::abs(rooted_world.m_stage_origin_y - 1.5f) < 0.001f,
+            "collision world records the live STAGE root's world-space origin height");
+        const auto rooted_spawn = sdbz::find_stage_player_spawn(rooted_world);
+        require(rooted_spawn.has_value() &&
+            std::abs(rooted_spawn->m_position[1] - 30.05f) < 0.01f,
+            "player spawns on the STAGE floor, not a template/effect surface near the origin");
+    }
+
     // Recompute collision in world space after rotation and non-uniform scale.
     // This catches the common error of transforming a normal like a position
     // or leaving local-space bounds attached to world-space vertices.
@@ -308,9 +353,34 @@ int main()
     require(tiled_spawn.has_value(),
         "spawn finder accepts a floor assembled from adjacent HIT polygons");
 
-    // The spawn finder must prefer the walkable surface closest to ground
-    // level (Y=0) over a larger elevated platform, so the player does not spawn
-    // at the highest collision point in the stage.
+    // Tiny gaps between authored HIT strips must not swallow a player's
+    // bottom contact when the capsule footprint still overlaps the floor on
+    // both sides of the seam.
+    sdbz::s_stage_collision_world seamed_floor;
+    for (int side = 0; side < 2; ++side)
+    {
+        const float min_x = side == 0 ? -2.0f : 0.01f;
+        const float max_x = side == 0 ? -0.01f : 2.0f;
+        sdbz::s_stage_collision_polygon floor_tile;
+        floor_tile.m_normal = { 0.0f, 1.0f, 0.0f };
+        floor_tile.m_bounds_min = { min_x, 0.0f, -2.0f };
+        floor_tile.m_bounds_max = { max_x, 0.0f, 2.0f };
+        floor_tile.m_projected_area = (max_x - min_x) * 4.0f;
+        floor_tile.m_vertices = {
+            { min_x, 0.0f, -2.0f }, { max_x, 0.0f, -2.0f },
+            { max_x, 0.0f, 2.0f }, { min_x, 0.0f, 2.0f }
+        };
+        seamed_floor.m_polygons.push_back(std::move(floor_tile));
+    }
+    sdbz::build_stage_collision_spatial_index(seamed_floor);
+    require(!sdbz::query_stage_ground(seamed_floor, 0.0f, 0.0f, 0.0f),
+        "the deliberate tiny HIT seam has no direct centre polygon");
+    require(sdbz::query_stage_ground_capsule(
+        seamed_floor, 0.0f, 0.0f, 0.0f, 0.25f, 0.35f, 2.0f, 50.0f).has_value(),
+        "capsule ground query bridges a tiny seam using consistent nearby floor samples");
+
+    // With an untransformed stage root, the spawn finder prefers the
+    // walkable surface closest to the root's Y=0 origin over an elevated one.
     sdbz::s_stage_collision_world two_floor_world;
     {
         sdbz::s_stage_collision_polygon platform;
@@ -350,9 +420,46 @@ int main()
             "spawn object name is the ground floor");
     }
 
+    // Do not group different elevations into broad half-unit buckets: a
+    // slightly raised but much larger platform must not beat the lower floor
+    // merely because its polygon has more clearance.
+    sdbz::s_stage_collision_world close_height_world;
+    {
+        sdbz::s_stage_collision_polygon raised_platform;
+        raised_platform.m_normal = { 0.0f, 1.0f, 0.0f };
+        raised_platform.m_bounds_min = { 5.0f, 0.4f, -10.0f };
+        raised_platform.m_bounds_max = { 25.0f, 0.4f, 10.0f };
+        raised_platform.m_projected_area = 400.0f;
+        raised_platform.m_object_name = "raised_platform";
+        raised_platform.m_vertices = {
+            { 5.0f, 0.4f, -10.0f }, { 25.0f, 0.4f, -10.0f },
+            { 25.0f, 0.4f, 10.0f }, { 5.0f, 0.4f, 10.0f }
+        };
+        close_height_world.m_polygons.push_back(std::move(raised_platform));
+    }
+    {
+        sdbz::s_stage_collision_polygon ground_floor;
+        ground_floor.m_normal = { 0.0f, 1.0f, 0.0f };
+        ground_floor.m_bounds_min = { -18.0f, 0.0f, -3.0f };
+        ground_floor.m_bounds_max = { -12.0f, 0.0f, 3.0f };
+        ground_floor.m_projected_area = 36.0f;
+        ground_floor.m_object_name = "ground_floor";
+        ground_floor.m_vertices = {
+            { -18.0f, 0.0f, -3.0f }, { -12.0f, 0.0f, -3.0f },
+            { -12.0f, 0.0f, 3.0f }, { -18.0f, 0.0f, 3.0f }
+        };
+        close_height_world.m_polygons.push_back(std::move(ground_floor));
+    }
+    sdbz::build_stage_collision_spatial_index(close_height_world);
+    const auto close_height_spawn = sdbz::find_stage_player_spawn(close_height_world);
+    require(close_height_spawn.has_value() &&
+        close_height_spawn->m_object_name == "ground_floor" &&
+        std::abs(close_height_spawn->m_position[1] - 0.05f) < 0.01f,
+        "spawn ranking prefers the truly lower floor over a larger platform within half a unit");
+
     // A collision polygon below the stage (e.g. world bounds) must not win
     // over the actual playable ground just because it is lower. Prefer the
-    // surface closest to Y=0, tiebreaking by area.
+    // surface closest to the stage-root reference height.
     sdbz::s_stage_collision_world below_ground_world;
     {
         sdbz::s_stage_collision_polygon below;
@@ -513,6 +620,23 @@ int main()
         wall_world, 0.8f, 0.0f, 0.0f, 0.35f, 1.75f),
         "capsule clearance rejects a player intersecting a vertical wall");
 
+    // A low barrier touching only the lower hemisphere should use that
+    // hemisphere's narrower cross-section, not the full cylinder radius.
+    sdbz::s_stage_collision_world low_barrier_world;
+    sdbz::s_stage_collision_polygon low_barrier;
+    low_barrier.m_normal = { 1.0f, 0.0f, 0.0f };
+    low_barrier.m_bounds_min = { 0.2f, 0.0f, -1.0f };
+    low_barrier.m_bounds_max = { 0.2f, 0.05f, 1.0f };
+    low_barrier.m_vertices = {
+        { 0.2f, 0.0f, -1.0f }, { 0.2f, 0.05f, -1.0f },
+        { 0.2f, 0.05f, 1.0f }, { 0.2f, 0.0f, 1.0f }
+    };
+    low_barrier_world.m_polygons.push_back(low_barrier);
+    sdbz::build_stage_collision_spatial_index(low_barrier_world);
+    require(sdbz::is_stage_capsule_clear(
+        low_barrier_world, 0.0f, 0.0f, 0.0f, 0.25f, 1.75f),
+        "low barrier outside the capsule's bottom-hemisphere cross-section does not block it");
+
     sdbz::s_stage_collision_world ceiling_world = collision;
     sdbz::s_stage_collision_polygon ceiling;
     ceiling.m_normal = { 0.0f, 1.0f, 0.0f };
@@ -601,6 +725,196 @@ int main()
     }
     require(!edge_controller.m_grounded && edge_controller.m_position[1] < 2.0f,
         "player walks off a HIT platform and falls instead of remaining on an infinite plane");
+
+    // Capsule support must report the centre contact on a slope, not the
+    // highest ring sample (which would lift the actor by radius * slope).
+    sdbz::s_stage_collision_world sloped_world;
+    sdbz::s_stage_collision_polygon sloped_floor;
+    sloped_floor.m_normal = { -0.4472136f, 0.8944272f, 0.0f };
+    sloped_floor.m_bounds_min = { -5.0f, -2.5f, -5.0f };
+    sloped_floor.m_bounds_max = { 5.0f, 2.5f, 5.0f };
+    sloped_floor.m_projected_area = 100.0f;
+    sloped_floor.m_vertices = {
+        { -5.0f, -2.5f, -5.0f }, { 5.0f, 2.5f, -5.0f },
+        { 5.0f, 2.5f, 5.0f }, { -5.0f, -2.5f, 5.0f }
+    };
+    sloped_world.m_polygons.push_back(sloped_floor);
+    sdbz::build_stage_collision_spatial_index(sloped_world);
+    const auto slope_contact = sdbz::query_stage_ground_capsule(
+        sloped_world, 0.0f, 0.0f, 0.0f, 0.25f, 0.1f, 0.1f, 50.0f);
+    require(slope_contact.has_value(),
+        "capsule ground query accepts a fully supported sloped floor");
+    if (slope_contact)
+    {
+        require(std::abs(slope_contact->m_position[0]) < 0.001f &&
+            std::abs(slope_contact->m_position[1]) < 0.001f &&
+            std::abs(slope_contact->m_position[2]) < 0.001f,
+            "capsule ground query returns the centre height on a slope");
+    }
+
+    // A continuous 45-degree ramp meeting a flat floor must not lose support
+    // when the capsule straddles the crease. Both polygons are independently
+    // walkable, but their normals differ by 45 degrees.
+    sdbz::s_stage_collision_world ramp_floor_seam;
+    sdbz::s_stage_collision_polygon ramp_polygon;
+    ramp_polygon.m_normal = { -0.70710678f, 0.70710678f, 0.0f };
+    ramp_polygon.m_bounds_min = { -3.0f, -3.0f, -3.0f };
+    ramp_polygon.m_bounds_max = { 0.0f, 0.0f, 3.0f };
+    ramp_polygon.m_projected_area = 18.0f;
+    ramp_polygon.m_vertices = {
+        { -3.0f, -3.0f, -3.0f }, { 0.0f, 0.0f, -3.0f },
+        { 0.0f, 0.0f, 3.0f }, { -3.0f, -3.0f, 3.0f }
+    };
+    ramp_floor_seam.m_polygons.push_back(ramp_polygon);
+
+    sdbz::s_stage_collision_polygon flat_polygon;
+    flat_polygon.m_normal = { 0.0f, 1.0f, 0.0f };
+    flat_polygon.m_bounds_min = { 0.0f, 0.0f, -3.0f };
+    flat_polygon.m_bounds_max = { 3.0f, 0.0f, 3.0f };
+    flat_polygon.m_projected_area = 18.0f;
+    flat_polygon.m_vertices = {
+        { 0.0f, 0.0f, -3.0f }, { 3.0f, 0.0f, -3.0f },
+        { 3.0f, 0.0f, 3.0f }, { 0.0f, 0.0f, 3.0f }
+    };
+    ramp_floor_seam.m_polygons.push_back(flat_polygon);
+    sdbz::build_stage_collision_spatial_index(ramp_floor_seam);
+
+    const auto crease_support = sdbz::query_stage_ground_capsule(
+        ramp_floor_seam, -0.1f, 0.0f, -0.1f, 0.25f, 0.1f, 0.1f, 50.0f);
+    require(crease_support.has_value(),
+        "capsule remains supported across a continuous ramp-to-flat HIT crease");
+
+    sdbz::s_player_controller ramp_controller;
+    ramp_controller.m_position = { -0.1f, -0.05f, 0.0f };
+    ramp_controller.m_grounded = true;
+    sdbz::s_player_input ramp_movement{};
+    ramp_movement.m_move_x = 1.0f;
+    for (int frame = 0; frame < 24; ++frame)
+    {
+        sdbz::update_player_controller(ramp_controller, ramp_movement,
+            1.0f / 60.0f, &ramp_floor_seam);
+    }
+    require(ramp_controller.m_grounded && ramp_controller.m_position[0] > 0.5f,
+        "player crosses from a sloped HIT polygon onto the adjoining flat floor");
+
+    sdbz::s_player_controller ramp_jump_controller;
+    ramp_jump_controller.m_position = { -0.1f, -0.05f, 0.0f };
+    ramp_jump_controller.m_grounded = true;
+    sdbz::s_player_input ramp_jump{};
+    ramp_jump.m_jump_pressed = true;
+    sdbz::update_player_controller(ramp_jump_controller, ramp_jump,
+        1.0f / 60.0f, &ramp_floor_seam);
+    require(!ramp_jump_controller.m_grounded && ramp_jump_controller.m_velocity[1] > 0.0f,
+        "player can jump while standing at a walkable ramp-to-flat crease");
+
+    // Slopes steeper than the former 50-degree limit were being classified as
+    // walls, leaving the actor neither grounded nor able to jump. The default
+    // controller limit now permits a 60-degree arena ramp while still treating
+    // near-vertical HIT faces as blocking walls.
+    sdbz::s_stage_collision_world steep_ramp_world;
+    sdbz::s_stage_collision_polygon steep_ramp;
+    constexpr float k_steep_ramp_angle = 60.0f;
+    constexpr float k_steep_ramp_radians = k_steep_ramp_angle *
+        0.01745329251994329577f;
+    const float steep_ramp_gradient = std::tan(k_steep_ramp_radians);
+    steep_ramp.m_normal = { -std::sin(k_steep_ramp_radians),
+        std::cos(k_steep_ramp_radians), 0.0f };
+    steep_ramp.m_bounds_min = { -4.0f, -4.0f * steep_ramp_gradient, -3.0f };
+    steep_ramp.m_bounds_max = { 4.0f, 4.0f * steep_ramp_gradient, 3.0f };
+    steep_ramp.m_projected_area = 48.0f;
+    steep_ramp.m_vertices = {
+        { -4.0f, -4.0f * steep_ramp_gradient, -3.0f },
+        { 4.0f, 4.0f * steep_ramp_gradient, -3.0f },
+        { 4.0f, 4.0f * steep_ramp_gradient, 3.0f },
+        { -4.0f, -4.0f * steep_ramp_gradient, 3.0f }
+    };
+    steep_ramp_world.m_polygons.push_back(steep_ramp);
+    sdbz::build_stage_collision_spatial_index(steep_ramp_world);
+
+    sdbz::s_player_controller steep_ramp_controller;
+    steep_ramp_controller.m_position = { -1.0f,
+        -steep_ramp_gradient + steep_ramp_controller.m_collision_foot_offset, 0.0f };
+    steep_ramp_controller.m_grounded = true;
+    sdbz::s_player_input steep_ramp_input{};
+    steep_ramp_input.m_move_x = 1.0f;
+    steep_ramp_input.m_run = true;
+    for (int frame = 0; frame < 24; ++frame)
+    {
+        sdbz::update_player_controller(steep_ramp_controller, steep_ramp_input,
+            1.0f / 60.0f, &steep_ramp_world);
+    }
+    require(steep_ramp_controller.m_grounded && steep_ramp_controller.m_position[0] > 0.0f,
+        "player can run up a 60-degree HIT ramp without sticking or losing ground contact");
+
+    sdbz::s_player_input steep_ramp_jump{};
+    steep_ramp_jump.m_jump_pressed = true;
+    const float steep_ramp_y_before_jump = steep_ramp_controller.m_position[1];
+    sdbz::update_player_controller(steep_ramp_controller, steep_ramp_jump,
+        1.0f / 60.0f, &steep_ramp_world);
+    require(!steep_ramp_controller.m_grounded && steep_ramp_controller.m_velocity[1] > 0.0f &&
+        steep_ramp_controller.m_position[1] > steep_ramp_y_before_jump,
+        "player can jump from a 60-degree ramp while uphill momentum is still present");
+
+    // A centre contact is not enough at a ledge: the full footprint must be
+    // supported across the whole ring, including the outer edge.
+    sdbz::s_stage_collision_world partial_edge_world;
+    sdbz::s_stage_collision_polygon partial_edge_floor;
+    partial_edge_floor.m_normal = { 0.0f, 1.0f, 0.0f };
+    partial_edge_floor.m_bounds_min = { -2.0f, 0.0f, -2.0f };
+    partial_edge_floor.m_bounds_max = { 2.0f, 0.0f, 2.0f };
+    partial_edge_floor.m_projected_area = 16.0f;
+    partial_edge_floor.m_vertices = {
+        { -2.0f, 0.0f, -2.0f }, { 2.0f, 0.0f, -2.0f },
+        { 2.0f, 0.0f, 2.0f }, { -2.0f, 0.0f, 2.0f }
+    };
+    partial_edge_world.m_polygons.push_back(partial_edge_floor);
+    sdbz::build_stage_collision_spatial_index(partial_edge_world);
+    require(sdbz::query_stage_ground(partial_edge_world, 1.9f, 0.0f, 0.0f).has_value(),
+        "the centre point remains over the floor near the edge");
+    require(!sdbz::query_stage_ground_capsule(
+        partial_edge_world, 1.9f, 0.0f, 0.0f, 0.25f, 0.1f, 0.1f, 50.0f),
+        "capsule ground query rejects a footprint that hangs over a ledge");
+    sdbz::s_player_controller partial_edge_controller;
+    partial_edge_controller.m_position = { 1.9f, 0.05f, 0.0f };
+    partial_edge_controller.m_grounded = true;
+    sdbz::s_player_input partial_edge_input{};
+    partial_edge_input.m_move_x = 1.0f;
+    sdbz::update_player_controller(partial_edge_controller, partial_edge_input,
+        1.0f / 60.0f, &partial_edge_world);
+    require(!partial_edge_controller.m_grounded &&
+        partial_edge_controller.m_position[1] < 0.05f,
+        "controller starts falling when the capsule footprint no longer fits on the floor");
+
+    // Spawn height must be measured relative to the live STAGE root origin,
+    // not the world's absolute Y=0. This represents a stage translated upward.
+    sdbz::s_stage_collision_world translated_spawn_world;
+    translated_spawn_world.m_stage_origin_y = 100.0f;
+    sdbz::s_stage_collision_polygon world_origin_floor;
+    world_origin_floor.m_normal = { 0.0f, 1.0f, 0.0f };
+    world_origin_floor.m_bounds_min = { -10.0f, 0.0f, -10.0f };
+    world_origin_floor.m_bounds_max = { 10.0f, 0.0f, 10.0f };
+    world_origin_floor.m_projected_area = 400.0f;
+    world_origin_floor.m_object_name = "world_origin_floor";
+    world_origin_floor.m_vertices = {
+        { -10.0f, 0.0f, -10.0f }, { 10.0f, 0.0f, -10.0f },
+        { 10.0f, 0.0f, 10.0f }, { -10.0f, 0.0f, 10.0f }
+    };
+    translated_spawn_world.m_polygons.push_back(world_origin_floor);
+    sdbz::s_stage_collision_polygon translated_floor = world_origin_floor;
+    translated_floor.m_bounds_min[1] = 100.0f;
+    translated_floor.m_bounds_max[1] = 100.0f;
+    translated_floor.m_object_name = "translated_stage_floor";
+    for (auto& vertex : translated_floor.m_vertices)
+    {
+        vertex[1] = 100.0f;
+    }
+    translated_spawn_world.m_polygons.push_back(translated_floor);
+    sdbz::build_stage_collision_spatial_index(translated_spawn_world);
+    const auto translated_spawn = sdbz::find_stage_player_spawn(translated_spawn_world);
+    require(translated_spawn.has_value() &&
+        std::abs(translated_spawn->m_position[1] - 100.05f) < 0.01f &&
+        translated_spawn->m_object_name == "translated_stage_floor",
+        "spawn selection follows the translated STAGE root instead of world Y=0");
 
     if (g_failures != 0)
     {

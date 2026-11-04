@@ -66,8 +66,8 @@ namespace sdbz
                 controller.m_velocity[2] * controller.m_velocity[2];
             if (horizontal_speed_sq > 1.0e-4f)
             {
-                controller.m_yaw_degrees = std::atan2(-controller.m_velocity[0],
-                    -controller.m_velocity[2]) * k_radians_to_degrees;
+                controller.m_yaw_degrees = std::atan2(controller.m_velocity[0],
+                    controller.m_velocity[2]) * k_radians_to_degrees;
             }
         }
 
@@ -107,9 +107,10 @@ namespace sdbz
             bool was_grounded = controller.m_grounded;
             if (was_grounded)
             {
-                const auto support = query_stage_ground(collision_world,
+                const auto support = query_stage_ground_capsule(collision_world,
                     controller.m_position[0], controller.m_position[2],
                     previous_y - controller.m_collision_foot_offset,
+                    controller.m_collision_capsule_radius,
                     controller.m_collision_step_height,
                     controller.m_collision_step_down,
                     controller.m_max_walkable_slope_degrees);
@@ -152,8 +153,8 @@ namespace sdbz
                 controller.m_collision_capsule_radius,
                 controller.m_collision_capsule_height,
                 controller.m_max_walkable_slope_degrees);
-            const float next_x = resolved_horizontal[0];
-            const float next_z = resolved_horizontal[1];
+            float next_x = resolved_horizontal[0];
+            float next_z = resolved_horizontal[1];
             if (next_y > controller.m_position[1] + 1.0e-5f &&
                 !is_stage_capsule_clear(collision_world, next_x, next_z,
                     next_y - controller.m_collision_foot_offset,
@@ -161,16 +162,43 @@ namespace sdbz
                     controller.m_collision_capsule_height,
                     controller.m_max_walkable_slope_degrees))
             {
-                // Stop upward movement at an overhead HIT surface.
-                next_y = controller.m_position[1];
-                controller.m_velocity[1] = 0.0f;
+                // Uphill momentum can move the capsule into the rising ramp
+                // during the first jump frames. In that case hold horizontal
+                // movement for this tick while allowing the jump to rise; the
+                // player can move forward again once the capsule clears the
+                // surface. A real overhead obstruction also blocks the
+                // current column, in which case upward movement is stopped.
+                const bool current_column_clear = is_stage_capsule_clear(
+                    collision_world, controller.m_position[0], controller.m_position[2],
+                    next_y - controller.m_collision_foot_offset,
+                    controller.m_collision_capsule_radius,
+                    controller.m_collision_capsule_height,
+                    controller.m_max_walkable_slope_degrees);
+                if (current_column_clear)
+                {
+                    next_x = controller.m_position[0];
+                    next_z = controller.m_position[2];
+                }
+                else
+                {
+                    // Stop upward movement at an actual overhead HIT surface.
+                    next_y = controller.m_position[1];
+                    controller.m_velocity[1] = 0.0f;
+                }
             }
             const float support_reference_y = std::max(previous_y, next_y) -
                 controller.m_collision_foot_offset;
             const float max_drop = was_grounded
                 ? controller.m_collision_step_down : 1000000.0f;
-            const auto support = query_stage_ground(collision_world,
+
+            // Resolve support at the destination, not at the highest point
+            // anywhere along the swept path. Using an intermediate point here
+            // can keep the player grounded after walking off an edge or pull
+            // the player up onto a platform before reaching it. Vertical
+            // crossing is still detected by the previous/next feet heights.
+            const auto best_support = query_stage_ground_capsule(collision_world,
                 next_x, next_z, support_reference_y,
+                controller.m_collision_capsule_radius,
                 controller.m_collision_step_height, max_drop,
                 controller.m_max_walkable_slope_degrees);
 
@@ -179,9 +207,9 @@ namespace sdbz
             controller.m_position[1] = next_y;
             controller.m_grounded = false;
 
-            if (support)
+            if (best_support)
             {
-                const float support_y = support->m_position[1] +
+                const float support_y = best_support->m_position[1] +
                     controller.m_collision_foot_offset;
                 const bool walked_onto_surface = was_grounded &&
                     controller.m_velocity[1] <= 0.0f &&
@@ -197,9 +225,9 @@ namespace sdbz
                     }
                     controller.m_position[1] = support_y;
                     controller.m_velocity[1] = 0.0f;
-                    controller.m_ground_normal = support->m_normal;
-                    controller.m_ground_polygon_index = support->m_collision_polygon_index;
-                    controller.m_ground_object_name = support->m_object_name;
+                    controller.m_ground_normal = best_support->m_normal;
+                    controller.m_ground_polygon_index = best_support->m_collision_polygon_index;
+                    controller.m_ground_object_name = best_support->m_object_name;
                     controller.m_grounded = true;
                 }
             }

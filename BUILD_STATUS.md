@@ -179,3 +179,118 @@ GAME.DAT stage corpus, so no real stage could be batch-validated here. The SDL3
 application target also remains uncompiled because SDL3 is not installed in this
 environment. The synthetic tests validate the transformation and query code,
 not the semantic correctness of every original stage's HIT object references.
+
+## Review of updated local stage-player changes (2026-11-04)
+
+The user-supplied project update was treated as the baseline; existing local
+changes and tuning were retained. The review corrected several gameplay
+issues in the collision/spawn path:
+
+- Capsule ground support now returns the centre contact height and separately
+  validates the complete sampled footprint. The previous highest-ring-point
+  result could lift the player on slopes and keep the player supported when
+  only one side of the capsule remained over a ledge.
+- Ground support after horizontal movement is now resolved at the destination.
+  The previous path-wide maximum could keep the player grounded from an
+  intermediate point after the final position had left the floor.
+- Capsule-vs-wall clearance now uses the wall's vertical overlap to obtain the
+  capsule cross-section radius. Low barriers intersecting only the bottom or
+  top hemisphere no longer get tested against the full cylinder radius.
+- Automatic spawn height is measured continuously relative to the transformed
+  live STAGE root origin rather than absolute world Y=0. Broad half-unit height
+  buckets and unverified `Flr` / `BFlr` / `Wal` name suffixes are no longer used
+  to choose a spawn surface.
+- Spawn overrides match the primary stage name only, not arbitrary mesh/HIT
+  strings elsewhere in the STG name table.
+
+Validation on this review: clean GCC 14.2 Release configure/build of the native
+core and all five CTest targets passed. Added regressions cover sloped-floor
+height, partial-footprint ledge support, low barriers, translated STAGE origins,
+and edge departure. The SDL3 frontend was not compiled because SDL3 headers and
+libraries are not installed in this environment; no original regional STG/HIT
+corpus was present for actual-stage spawn validation. The automatic spawn
+heuristic therefore remains provisional, and `player_spawns.cfg` should be used
+for stages whose authored gameplay start cannot be inferred safely.
+
+
+Additional audit fixes (2026-11-04):
+- Signed gameplay-camera zoom now accumulates small high-resolution wheel deltas continuously across zero; the near-zero offset is applied only when calculating the render pose.
+- Gamepad camera orbit and zoom are scaled by frame delta time, preventing camera response from changing with frame rate.
+- Spawn candidates now compare exact height delta from the transformed STAGE root instead of broad half-unit buckets, so a higher but larger platform cannot win solely on clearance.
+- The HIT debug capsule now uses the same clamped cap radius as the collision capsule when model height is shorter than its requested diameter.
+- Added regression coverage for fractional wheel zoom and close-height spawn competition.
+
+## Player floor-contact regression fix (2026-11-04)
+
+The reviewed controller could lose its ground contact on narrow HIT floor strips
+or at small polygon seams because the runtime ground query required every point
+around the capsule's projected radius to overlap valid floor geometry. That
+modeled a flat-bottom cylinder rather than the controller's vertical capsule.
+
+The runtime query now prefers the actual centreline contact, retains strict
+full-footprint validation for spawn placement and wide-floor ledge detection,
+and adds two constrained fallbacks: a narrow/elongated HIT polygon may support
+the capsule when its centre has sufficient interior clearance, and a tiny gap
+between floor polygons may be bridged only when a majority of nearby samples
+resolve to one consistent support plane. The old wide-floor edge rejection
+remains covered.
+
+Added controller integration tests keep a player grounded on a narrow HIT strip
+for two seconds, then jump and land on that same collision world. Added collision
+tests cover a tiny inter-polygon seam while retaining the wide-floor ledge-fall
+regression. GCC 14.2 Release and ASan/UBSan Debug builds pass all five CTest
+targets. The complete original stage corpus and SDL3 runtime are still required
+to confirm this against the user's actual arena HIT files.
+
+## Gamepad debug-menu and VFS navigation (2026-11-04)
+
+Added controller-only menu navigation while retaining all keyboard input:
+
+- Select/Back + Start opens or closes the debug menu. The chord is edge-latched
+  until both buttons are released, so holding one button and tapping the other
+  cannot repeatedly toggle the menu.
+- D-pad up/down moves the selected row. D-pad left/right changes the selected
+  Stage or Motion value, or sets visibility toggles off/on.
+- A/South activates the selected debug-menu row or opens the selected VFS entry.
+- B/East backs out one debug-menu level or VFS directory; at the root it closes
+  the active menu/browser.
+- In the VFS browser, D-pad left/right goes to the parent directory / opens the
+  selected directory, while up/down changes the entry selection.
+- The overlay prompts now display the controller controls alongside keyboard
+  equivalents. A guard also handles the frame in which a menu is first opened
+  before its row list has been rebuilt.
+
+The native core Release build and all five CTest targets pass. The SDL3 game
+frontend could not be compiled in this environment because SDL3 is not installed
+and network access is unavailable for the CMake FetchContent download. Runtime
+controller testing remains to be done on the Windows build.
+
+
+## Sloped-surface grounding and jump fix (2026-11-04)
+
+The slope-contact regression had two causes. First, capsule support required
+adjacent HIT polygons to have a normal dot product of at least 0.80 and used a
+fixed 0.16-unit height tolerance. A walkable ramp meeting a flat floor at a
+continuous crease could therefore lose grounded state even though all sampled
+points remained over walkable collision. The ring samples now allow the height
+variation implied by the configured maximum walkable slope over their radius;
+each sample must still resolve to a walkable polygon, so ledge detection remains
+active. The fixed normal-dot cutoff was removed.
+
+Second, surfaces above 50 degrees were classified as walls. The default
+walkable limit is now 60 degrees, and the player step-up allowance is 0.42
+world units, sufficient for the 14-unit/second run speed at 60 Hz on a
+60-degree ramp. Near-vertical HIT faces remain blocking walls. During a jump,
+if residual uphill momentum would push the destination capsule into the ramp,
+horizontal movement is held for that tick while upward movement continues. A
+real overhead obstruction still blocks the current vertical column and stops
+the jump.
+
+Regression tests first confirmed that the previous code failed the ramp-to-flat
+crease case (loss of support, inability to cross, and inability to jump). They
+now cover the crease, movement onto the adjacent floor, jumping at the crease,
+and running/jumping on a 60-degree ramp at the configured maximum slope,
+including the initial uphill-momentum frames after jump input. All five Release CTest targets and
+all five ASan/UBSan Debug CTest targets pass. The SDL3 runtime and original
+regional stage corpus remain unavailable here, so the actual arena still needs
+in-game verification.

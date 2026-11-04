@@ -59,6 +59,16 @@ bool debug_menu_input(s_debug_menu& menu, const s_event& event,
         return false;
     }
 
+    // A menu can be opened and navigated in the same SDL event batch. Its
+    // rows are rebuilt after event processing, so ignore navigation until
+    // the first build rather than performing modulo arithmetic with zero.
+    if (menu.items.empty())
+    {
+        return false;
+    }
+    menu.selected = std::clamp(menu.selected, 0, static_cast<int>(menu.items.size()) - 1);
+    const std::size_t selected_index = static_cast<std::size_t>(menu.selected);
+
     // Quick-select: 0-9 then a-z.
     const auto quick_select_index = [](e_key key) -> int
     {
@@ -102,6 +112,45 @@ bool debug_menu_input(s_debug_menu& menu, const s_event& event,
         return true;
     }
 
+    // Horizontal navigation adjusts the currently selected value row.
+    // This gives the full D-pad useful behaviour without changing the
+    // existing Enter/Space activation semantics.
+    if (event.key == e_key::left || event.key == e_key::right)
+    {
+        const bool backwards = event.key == e_key::left;
+        const std::string& label = menu.items[selected_index].label;
+        if (label == "Stage" && has_stage && !stages.empty())
+        {
+            stage_index = backwards ? (stage_index + stages.size() - 1) % stages.size()
+                                    : (stage_index + 1) % stages.size();
+            std::println("Stage: {}", stages[stage_index].m_names[0]);
+            return true;
+        }
+        if (label == "Motion" && has_motion && !motions.empty())
+        {
+            motion_clip_index = backwards ? (motion_clip_index + motions.size() - 1) % motions.size()
+                                          : (motion_clip_index + 1) % motions.size();
+            animation_time = 0.0f;
+            std::println("Motion clip {}: {}", motion_clip_index, motions[motion_clip_index].m_name);
+            return true;
+        }
+        if (label == "Show effect")
+        {
+            show_effect = !backwards;
+            return true;
+        }
+        if (label == "Show collision")
+        {
+            show_collision = !backwards;
+            return true;
+        }
+        if (label == "Show templates")
+        {
+            show_templates = !backwards;
+            return true;
+        }
+    }
+
     // Enter activates.
     if (event.key == e_key::enter || event.key == e_key::space)
     {
@@ -109,7 +158,7 @@ bool debug_menu_input(s_debug_menu& menu, const s_event& event,
         {
             return true;
         }
-        const std::string& label = menu.items[menu.selected].label;
+        const std::string& label = menu.items[selected_index].label;
 
         // Archive VFS opens the archive browser directly (not a submenu).
         if (label == "Archive VFS")
@@ -124,7 +173,7 @@ bool debug_menu_input(s_debug_menu& menu, const s_event& event,
             return true;
         }
 
-        if (menu.items[menu.selected].is_submenu)
+        if (menu.items[selected_index].is_submenu)
         {
             menu.stack.push_back(0);
             menu.selected = 0;
@@ -206,7 +255,7 @@ void debug_menu_draw(const s_debug_menu& menu,
         title += " >";
     }
     draw_text(title, 10.0f, 10.0f, 1.0f, 255, 255, 0, font, glyph_textures);
-    draw_text("Home: close  |  End: back  |  Enter: select  |  Arrows: navigate  |  0-9a-z: quick select",
+    draw_text("Select+Start: menu  |  B/End: back  |  A/Enter: select  |  D-pad: navigate / adjust  |  Home: close",
         10.0f, 30.0f, 0.6f, 160, 160, 160, font, glyph_textures);
 
     // Max 26 items per page.
@@ -238,6 +287,7 @@ void debug_menu_draw(const s_debug_menu& menu,
         static_cast<int>(menu.items.size()));
     for (int i = start; i < end_idx; ++i)
     {
+        const std::size_t item_index = static_cast<std::size_t>(i);
         const bool selected = (i == menu.selected);
         const std::uint8_t r = selected ? 255 : 200;
         const std::uint8_t g = selected ? 255 : 200;
@@ -255,12 +305,12 @@ void debug_menu_draw(const s_debug_menu& menu,
         }
 
         std::string line = (selected ? "> " : "  ") + key_hint + ") " +
-            menu.items[i].label;
-        if (!menu.items[i].value.empty())
+            menu.items[item_index].label;
+        if (!menu.items[item_index].value.empty())
         {
-            line += "  [" + menu.items[i].value + "]";
+            line += "  [" + menu.items[item_index].value + "]";
         }
-        if (menu.items[i].is_submenu)
+        if (menu.items[item_index].is_submenu)
         {
             line += "  ▸";
         }

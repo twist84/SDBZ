@@ -54,6 +54,19 @@ float gamepad_axis_to_input(const Sint16 axis)
     const float remapped = (magnitude - k_deadzone) / (1.0f - k_deadzone);
     return std::copysign(remapped, value);
 }
+
+void push_gamepad_menu_key(const SDL_Keycode key)
+{
+    SDL_Event key_event{};
+    key_event.type = SDL_EVENT_KEY_DOWN;
+    key_event.key.key = key;
+    key_event.key.down = true;
+    key_event.key.repeat = false;
+    if (!SDL_PushEvent(&key_event))
+    {
+        std::println(std::cerr, "Failed to queue gamepad menu input: {}", SDL_GetError());
+    }
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -691,6 +704,9 @@ int main(int argc, char** argv)
     std::println("SDL init done");
 
     SDL_Gamepad* gamepad = nullptr;
+    bool gamepad_select_down = false;
+    bool gamepad_start_down = false;
+    bool gamepad_menu_chord_latched = false;
     int gamepad_count = 0;
     SDL_JoystickID* gamepad_ids = SDL_GetGamepads(&gamepad_count);
     if (gamepad_ids)
@@ -777,6 +793,48 @@ int main(int argc, char** argv)
     int vfs_selected = 0;
     std::vector<std::string> vfs_path_components;
 
+    // Size the player collision capsule from the currently loaded model's
+    // axis-aligned bounding box (reference pose): radius from the XZ extent,
+    // height from the Y extent.
+    auto set_collision_capsule_from_model = [&]()
+    {
+        std::array<float, 3> bmin{ std::numeric_limits<float>::max(),
+                                   std::numeric_limits<float>::max(),
+                                   std::numeric_limits<float>::max() };
+        std::array<float, 3> bmax{ std::numeric_limits<float>::lowest(),
+                                   std::numeric_limits<float>::lowest(),
+                                   std::numeric_limits<float>::lowest() };
+        bool has_data = false;
+        for (const auto& mesh : loaded_model.m_meshes)
+        {
+            for (const auto& v : mesh.m_vertices)
+            {
+                bmin[0] = std::min(bmin[0], v.m_position[0]);
+                bmin[1] = std::min(bmin[1], v.m_position[1]);
+                bmin[2] = std::min(bmin[2], v.m_position[2]);
+                bmax[0] = std::max(bmax[0], v.m_position[0]);
+                bmax[1] = std::max(bmax[1], v.m_position[1]);
+                bmax[2] = std::max(bmax[2], v.m_position[2]);
+                has_data = true;
+            }
+        }
+        if (!has_data) return;
+        const float width_x = bmax[0] - bmin[0];
+        const float width_z = bmax[2] - bmin[2];
+        // Derive radius from the model's XZ extent but scale it down so the
+        // capsule hugs the body rather than the hair/arm extremities.
+        player_controller.m_collision_capsule_radius = std::max(width_x, width_z) * 0.25f;
+        player_controller.m_collision_capsule_height = bmax[1] - bmin[1];
+        // Jump apex = v^2 / (2g). Set jump speed so the apex equals the
+        // collision capsule height.
+        player_controller.m_jump_speed = std::sqrt(2.0f * player_controller.m_gravity *
+            player_controller.m_collision_capsule_height);
+        std::println("Collision capsule from model bounds: radius={} height={} jump_speed={} bounds=({}, {}, {})-({}, {}, {})",
+            player_controller.m_collision_capsule_radius, player_controller.m_collision_capsule_height,
+            player_controller.m_jump_speed,
+            bmin[0], bmin[1], bmin[2], bmax[0], bmax[1], bmax[2]);
+    };
+
     // Load a model selected from the VFS, including its companion texture and
     // motion packages. Both manual VFS model selection and automatic player
     // loading use this path so their behaviour stays identical.
@@ -794,6 +852,7 @@ int main(int argc, char** argv)
         const std::string model_name = fs::path(model_entry.m_name_cp932).stem().string();
         loaded_model = sdbz::parse_fmdl(model_data, model_name);
         has_loaded_model = true;
+        set_collision_capsule_from_model();
 
         mesh_visible.assign(loaded_model.m_meshes.size(), false);
         part_groups.clear();
@@ -1042,13 +1101,14 @@ int main(int argc, char** argv)
         const auto& collision_world = stage_collision_worlds[loaded_stage_index];
         const auto& stage = loaded_stages[loaded_stage_index];
         const sdbz::s_player_spawn_override* selected_override = nullptr;
-        for (const auto& stage_name : stage.m_names)
+        if (!stage.m_names.empty())
         {
-            selected_override = sdbz::find_player_spawn_override(player_spawn_overrides, stage_name);
-            if (selected_override)
-            {
-                break;
-            }
+            // m_names.front() is also the stage identifier printed by the
+            // viewer. Do not match overrides against every mesh/HIT object
+            // name in the shared STG string table; those can collide with a
+            // different stage's key.
+            selected_override = sdbz::find_player_spawn_override(
+                player_spawn_overrides, stage.m_names.front());
         }
 
         std::optional<sdbz::s_player_spawn> spawn;
@@ -1108,6 +1168,11 @@ int main(int argc, char** argv)
         std::println("Player spawn: HIT object='{}' node={} polygon={} position=({}, {}, {}) area={}",
                      spawn->m_object_name, spawn->m_stage_node_index, spawn->m_collision_polygon_index,
                      spawn->m_position[0], spawn->m_position[1], spawn->m_position[2], spawn->m_surface_area);
+        std::println(
+            "  stage key(s) for player_spawns.cfg: {} | {} from origin (XZ) | source: {}",
+            stage.m_names.empty() ? std::string("<unnamed>") : stage.m_names[0],
+            std::sqrt(spawn->m_position[0] * spawn->m_position[0] + spawn->m_position[2] * spawn->m_position[2]),
+            spawn_override_applied ? "player_spawns.cfg override" : "collision heuristic");
         return true;
     };
 
@@ -2014,16 +2079,105 @@ int main(int argc, char** argv)
                 {
                     SDL_CloseGamepad(gamepad);
                     gamepad = nullptr;
+                    gamepad_select_down = false;
+                    gamepad_start_down = false;
+                    gamepad_menu_chord_latched = false;
                 }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-                if (player_controller_active && !debug_menu.open && !vfs_open &&
-                    event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH)
+                if (!gamepad || event.gbutton.which != SDL_GetGamepadID(gamepad))
+                {
+                    break;
+                }
+
+                if (event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK)
+                {
+                    gamepad_select_down = true;
+                }
+                else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_START)
+                {
+                    gamepad_start_down = true;
+                }
+
+                // Select + Start toggles the debug menu. Require both buttons
+                // to be released before another toggle can occur, otherwise
+                // holding one and tapping the other would open/close repeatedly.
+                if (gamepad_select_down && gamepad_start_down && !gamepad_menu_chord_latched)
+                {
+                    if (vfs_open)
+                    {
+                        vfs_open = false;
+                        vfs_selected = 0;
+                        vfs_path_components.clear();
+                    }
+                    else
+                    {
+                        debug_menu.open = !debug_menu.open;
+                        debug_menu.selected = 0;
+                        debug_menu.stack.clear();
+                    }
+                    gamepad_menu_chord_latched = true;
+                    break;
+                }
+
+                if (gamepad_menu_chord_latched)
+                {
+                    break;
+                }
+
+                if (debug_menu.open || vfs_open)
+                {
+                    SDL_Keycode menu_key = SDLK_UNKNOWN;
+                    switch (event.gbutton.button)
+                    {
+                    case SDL_GAMEPAD_BUTTON_DPAD_UP:
+                        menu_key = SDLK_UP;
+                        break;
+                    case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
+                        menu_key = SDLK_DOWN;
+                        break;
+                    case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
+                        menu_key = SDLK_LEFT;
+                        break;
+                    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
+                        menu_key = SDLK_RIGHT;
+                        break;
+                    case SDL_GAMEPAD_BUTTON_SOUTH: // A / Cross
+                        menu_key = SDLK_RETURN;
+                        break;
+                    case SDL_GAMEPAD_BUTTON_EAST: // B / Circle
+                        menu_key = SDLK_END;
+                        break;
+                    default:
+                        break;
+                    }
+
+                    if (menu_key != SDLK_UNKNOWN)
+                    {
+                        push_gamepad_menu_key(menu_key);
+                    }
+                }
+                else if (player_controller_active && event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH)
                 {
                     player_jump_requested = true;
                 }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_UP:
+                if (gamepad && event.gbutton.which == SDL_GetGamepadID(gamepad))
+                {
+                    if (event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK)
+                    {
+                        gamepad_select_down = false;
+                    }
+                    else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_START)
+                    {
+                        gamepad_start_down = false;
+                    }
+                    if (!gamepad_select_down && !gamepad_start_down)
+                    {
+                        gamepad_menu_chord_latched = false;
+                    }
+                }
                 break;
             default:
                 break;
@@ -2056,14 +2210,20 @@ int main(int argc, char** argv)
 
                     if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
                     {
-                        player_camera.m_orbit_distance +=
-                            gamepad_axis_to_input(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+                        player_camera.m_orbit_distance = std::clamp(
+                            player_camera.m_orbit_distance +
+                                gamepad_axis_to_input(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY)) *
+                                    static_cast<float>(frame_time) * 4.0f,
+                            -1000000.0f, 1000000.0f);
                     }
                     else
                     {
+                        const float camera_input_scale = static_cast<float>(frame_time) * 60.0f;
                         sdbz::orbit_camera(player_camera,
-                                           gamepad_axis_to_input(-SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX)),
-                                           gamepad_axis_to_input(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY)));
+                            gamepad_axis_to_input(-SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX)) *
+                                camera_input_scale,
+                            gamepad_axis_to_input(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY)) *
+                                camera_input_scale);
                     }
                 }
                 player_input.m_jump_pressed = player_jump_requested;

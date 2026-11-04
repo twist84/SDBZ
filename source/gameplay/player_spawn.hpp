@@ -28,7 +28,7 @@ namespace sdbz
     [[nodiscard]] std::optional<s_player_spawn> resolve_player_spawn_override(
         const s_stage_collision_world& world,
         const s_player_spawn_override& spawn_override,
-        float foot_offset = 0.05f, float max_slope_degrees = 50.0f,
+        float foot_offset = 0.05f, float max_slope_degrees = 60.0f,
         float capsule_radius = 0.35f, float capsule_height = 1.75f,
         float vertical_tolerance = 2.0f);
 }

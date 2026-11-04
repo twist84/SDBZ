@@ -17,7 +17,7 @@ void draw_vfs_overlay(s_draw_context& ctx)
         ctx.vfs_archive && !ctx.vfs_entries.empty())
     {
         begin_2d(ctx.drawable_width, ctx.drawable_height);
-        draw_text("ARCHIVE VFS  (INFO.DAT/GAME.DAT)  (Esc: close)", 10.0f, 10.0f,
+        draw_text("ARCHIVE VFS  (INFO.DAT/GAME.DAT)", 10.0f, 10.0f,
             1.0f, 255, 255, 0, *ctx.font, *ctx.glyph_textures);
         // Breadcrumb path.
         std::string breadcrumb;
@@ -43,7 +43,7 @@ void draw_vfs_overlay(s_draw_context& ctx)
         if (start < 0) start = 0;
         for (int i = start; i < start + max_entries && i < static_cast<int>(ctx.vfs_entries.size()); ++i)
         {
-            const auto& ve = ctx.vfs_entries[i];
+            const auto& ve = ctx.vfs_entries[static_cast<std::size_t>(i)];
             const bool selected = (i == ctx.vfs_selected);
             const std::uint8_t r = selected ? 255 : 200;
             const std::uint8_t g = selected ? 255 : 200;
@@ -53,7 +53,7 @@ void draw_vfs_overlay(s_draw_context& ctx)
             draw_text(line, 10.0f, y, 0.7f, r, g, b, *ctx.font, *ctx.glyph_textures);
             y += 18.0f;
         }
-        draw_text("Enter: enter dir / load file  |  Backspace: up  |  Esc: close",
+        draw_text("A/Enter: open dir / load file  |  B/Backspace: parent / close  |  D-pad: navigate  |  Esc: close",
             10.0f, static_cast<float>(ctx.drawable_height) - 24.0f, 0.6f, 160, 160, 160,
             *ctx.font, *ctx.glyph_textures);
         end_2d();

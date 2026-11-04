@@ -55,8 +55,16 @@ int main()
 
     player_camera.m_orbit_distance = 0.1f;
     sdbz::zoom_orbit_camera(player_camera, 0.1f, 1.0f);
+    sdbz::zoom_orbit_camera(player_camera, 0.1f, 1.0f);
     require(player_camera.m_orbit_distance < 0.0f,
-        "camera crosses the near-zero singularity without stopping positive");
+        "camera crosses the near-zero singularity after accumulated zoom input");
+    player_camera.m_orbit_distance = 0.2f;
+    for (int step = 0; step < 4; ++step)
+    {
+        sdbz::zoom_orbit_camera(player_camera, 0.1f);
+    }
+    require(player_camera.m_orbit_distance < 0.0f,
+        "small high-resolution wheel steps accumulate across zero instead of sticking at the dead zone");
     sdbz::orbit_camera(player_camera, 25.0f, 100.0f);
     require(near(player_camera.m_yaw, 25.0f) && near(player_camera.m_pitch, 80.0f),
         "camera orbit updates yaw and clamps pitch");

@@ -334,45 +334,76 @@ std::println("Stage bbox: ({}, {}, {}) to ({}, {}, {}) distance={}",
             const auto& player = *ctx.player_controller;
             const float radius = std::max(player.m_collision_capsule_radius, 0.0f);
             const float height = std::max(player.m_collision_capsule_height, 0.0f);
+            const float cap_radius = std::min(radius, height * 0.5f);
+            const float feet_y = player.m_position[1] - player.m_collision_foot_offset;
             constexpr int k_segments = 24;
+            constexpr int k_hemi_rings = 8;
+            constexpr float k_pi = 3.14159265358979323846f;
             constexpr float k_two_pi = 6.28318530717958647692f;
+            const float cylinder_bottom = feet_y + cap_radius;
+            const float cylinder_top = feet_y + height - cap_radius;
             c_rasterizer::disable(GL_LIGHTING);
             c_rasterizer::disable(GL_TEXTURE_2D);
             c_rasterizer::color3f(1.0f, 0.75f, 0.05f);
-            c_rasterizer::begin(GL_LINE_LOOP);
-            for (int segment = 0; segment < k_segments; ++segment)
+            // Bottom hemisphere: rings from feet_y up to feet_y + radius.
+            for (int ring = 0; ring <= k_hemi_rings; ++ring)
             {
-                const float angle = k_two_pi * static_cast<float>(segment) /
-                    static_cast<float>(k_segments);
-                c_rasterizer::vertex3f(
-                    player.m_position[0] + std::cos(angle) * radius,
-                    player.m_position[1],
-                    player.m_position[2] + std::sin(angle) * radius);
+                const float t = static_cast<float>(ring) /
+                    static_cast<float>(k_hemi_rings);
+                const float theta = t * k_pi * 0.5f;
+                const float hemi_y = feet_y + cap_radius * (1.0f - std::cos(theta));
+                const float hemi_r = cap_radius * std::sin(theta);
+                c_rasterizer::begin(GL_LINE_LOOP);
+                for (int segment = 0; segment < k_segments; ++segment)
+                {
+                    const float angle = k_two_pi * static_cast<float>(segment) /
+                        static_cast<float>(k_segments);
+                    c_rasterizer::vertex3f(
+                        player.m_position[0] + std::cos(angle) * hemi_r,
+                        hemi_y,
+                        player.m_position[2] + std::sin(angle) * hemi_r);
+                }
+                c_rasterizer::end();
             }
-            c_rasterizer::end();
-            c_rasterizer::begin(GL_LINE_LOOP);
-            for (int segment = 0; segment < k_segments; ++segment)
+            // Top hemisphere: rings from feet_y + height - radius up to feet_y + height.
+            for (int ring = 0; ring <= k_hemi_rings; ++ring)
             {
-                const float angle = k_two_pi * static_cast<float>(segment) /
-                    static_cast<float>(k_segments);
-                c_rasterizer::vertex3f(
-                    player.m_position[0] + std::cos(angle) * radius,
-                    player.m_position[1] + height,
-                    player.m_position[2] + std::sin(angle) * radius);
+                const float t = static_cast<float>(ring) /
+                    static_cast<float>(k_hemi_rings);
+                const float theta = t * k_pi * 0.5f;
+                const float hemi_y = feet_y + height - cap_radius * (1.0f - std::cos(theta));
+                const float hemi_r = cap_radius * std::sin(theta);
+                c_rasterizer::begin(GL_LINE_LOOP);
+                for (int segment = 0; segment < k_segments; ++segment)
+                {
+                    const float angle = k_two_pi * static_cast<float>(segment) /
+                        static_cast<float>(k_segments);
+                    c_rasterizer::vertex3f(
+                        player.m_position[0] + std::cos(angle) * hemi_r,
+                        hemi_y,
+                        player.m_position[2] + std::sin(angle) * hemi_r);
+                }
+                c_rasterizer::end();
             }
-            c_rasterizer::end();
+            // Cylinder: vertical lines from cylinder_bottom to cylinder_top.
             c_rasterizer::begin(GL_LINES);
             for (int segment = 0; segment < 4; ++segment)
             {
                 const float angle = k_two_pi * static_cast<float>(segment) / 4.0f;
-                const float x = std::cos(angle) * radius;
-                const float z = std::sin(angle) * radius;
+                const float x = std::cos(angle) * cap_radius;
+                const float z = std::sin(angle) * cap_radius;
                 c_rasterizer::vertex3f(player.m_position[0] + x,
-                    player.m_position[1], player.m_position[2] + z);
+                    cylinder_bottom, player.m_position[2] + z);
                 c_rasterizer::vertex3f(player.m_position[0] + x,
-                    player.m_position[1] + height, player.m_position[2] + z);
+                    cylinder_top, player.m_position[2] + z);
             }
-            c_rasterizer::vertex3f(player.m_position[0], player.m_position[1],
+            c_rasterizer::vertex3f(player.m_position[0], cylinder_bottom,
+                player.m_position[2]);
+            c_rasterizer::vertex3f(player.m_position[0], cylinder_top,
+                player.m_position[2]);
+            c_rasterizer::end();
+            c_rasterizer::begin(GL_LINES);
+            c_rasterizer::vertex3f(player.m_position[0], cylinder_bottom,
                 player.m_position[2]);
             c_rasterizer::vertex3f(
                 player.m_position[0] + player.m_ground_normal[0] * 0.75f,

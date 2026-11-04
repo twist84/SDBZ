@@ -174,33 +174,36 @@ This order isolates the uncertain part (how HIT polygons should behave as gamepl
   matrices, have planes/normals/bounds recomputed, and are indexed by an XZ
   spatial grid for ground, capsule and wall candidate queries. Concave n-gons
   and large-polygon fallback are covered by tests.
-- **Phase 3 — valid player placement for every stage:** implemented in the
-  player_spawn package and stage collision world. `player_spawns.cfg` provides
-  validated per-stage spawn overrides (stage key, position, yaw) that are
-  resolved against the transformed HIT geometry with capsule support and
-  clearance checks. When no override applies, `find_stage_player_spawn()`
-  selects the walkable surface closest to ground level (|Y| within a tolerance
-  of Y=0), tiebreaking by largest area among ground-level surfaces and by
-  smallest |Y| among elevated surfaces. A large ground-level polygon's centroid
-  sits in the middle of the playable area rather than on a cliff edge or
-  shoreline sliver, so the player spawns on the playable floor rather than at
-  an elevated cliff, below-stage geometry, or a small spawn marker. If no
-  ground-level surface passes validation, the closest elevated surface is used.
-  Stage transitions refuse to spawn at Y=0 when no trustworthy floor exists,
-  reporting a clear diagnostic instead. `test_player_spawn.cpp` and
+- **Phase 3 — provisional player placement:** implemented in the player_spawn
+  package and stage collision world, but still requires validation against the
+  original stage corpus. `player_spawns.cfg` provides validated per-stage spawn
+  overrides (stage key, position, yaw) resolved against transformed HIT geometry
+  with capsule support and clearance checks. Without an override,
+  `find_stage_player_spawn()` ranks walkable candidates relative to the live
+  STAGE root's world-space origin height, then by interior clearance and
+  projected area. It does not assume world Y=0 or assign unverified meanings to
+  HIT object-name suffixes. The STAGE root, rather than template/EFFECT roots,
+  supplies the active collision set. Stage transitions refuse to spawn if no
+  supported, unobstructed candidate exists. `test_player_spawn.cpp` and
   `test_stage_collision.cpp` cover override parsing, case-insensitive matching,
-  edge rejection, seam-spawning spawns, capsule-size rejection, ground-level
-  preference, and below-ground geometry rejection.
-- **Phase 4 — stage-collision movement:** implemented in the player controller
-  package. Fixed-timestep (60 Hz) movement is independent of render frame rate.
-  Ground support, gravity, jump, landing and stable ground snapping query the
-  transformed HIT world. Horizontal movement is blocked and slides along
-  near-vertical HIT walls; slope support uses validated HIT surface normals;
-  support is re-checked after movement so the player walks across connected
-  polygons and falls only when leaving valid support. Overhead HIT surfaces
-  stop upward movement. `test_player_controller.cpp` and `test_stage_collision.cpp`
-  cover fixed-step determinism, jump buffering, edge falls, wall blocking and
-  sliding, landing, and landing on an authored HIT surface rather than Y=0.
+  edge rejection, seam support, capsule-size rejection, below-stage geometry,
+  and a translated stage origin. This is a collision-derived heuristic, not a
+  recovered authored spawn-marker system; stage-by-stage placement still needs
+  visual confirmation and overrides where appropriate.
+- **Phase 4 — stage-collision movement:** implemented provisionally in the
+  player controller package. Fixed-timestep (60 Hz) movement is independent of
+  render frame rate. Ground contact is queried at the capsule centre, while a
+  sampled inner/outer footprint must remain supported across the transformed
+  HIT world. The returned height remains the centre-plane height on slopes;
+  support cannot be supplied by only one edge sample. Horizontal movement is
+  blocked and slides along near-vertical HIT walls; gravity, jump, landing,
+  slope support and overhead clearance use the same collision world. Ground
+  support is evaluated at the destination so a point earlier on the movement
+  path cannot keep the player grounded after leaving an edge or pull the player
+  onto a platform before reaching it. `test_player_controller.cpp` and
+  `test_stage_collision.cpp` cover fixed-step determinism, jump buffering,
+  edge falls, wall blocking/sliding, low barriers, sloped support, and landing
+  on an authored HIT surface rather than Y=0.
 - **Phase 5 — gameplay camera:** implemented in the camera package and main
   loop. The player camera is separate from the world/viewer camera, uses a
   perspective projection and a signed orbit distance that crosses zero to the
@@ -225,3 +228,36 @@ detection. The original full INFO.DAT/GAME.DAT stage corpus and SDL3 runtime
 are unavailable in this environment, so real-stage validation and Windows
 runtime testing remain outstanding. Unknown STG spawn flags and HIT object
 flags/vectors are not assigned guessed semantics.
+
+### Latest collision follow-up — floor contact regression
+
+The runtime ground query now prioritises centreline contact for the vertical
+capsule. Full sampled-footprint validation is still used for spawn selection and
+wide-floor edge detection, but it no longer makes narrow elongated HIT strips
+unwalkable merely because the capsule's projected radius overhangs the strip.
+When the centre falls exactly into a tiny seam between floor polygons, a fallback
+reconstructs the centre-plane height only if a majority of nearby samples agree
+on one support plane. This preserves wide-floor ledge falls while preventing
+small authored HIT gaps from dropping the player. Release and ASan/UBSan tests
+cover narrow strips, seam bridging, jump/landing and edge departure. Real arena
+validation remains outstanding until the complete INFO.DAT/GAME.DAT corpus and
+SDL3 runtime are tested together.
+
+
+### Sloped HIT surface follow-up — 2026-11-04
+
+The player capsule support check no longer assumes adjacent walkable HIT
+polygons must have nearly identical normals. At a ramp-to-flat or ramp-to-ramp
+crease, neighbouring samples are compared using a height tolerance derived
+from the configured maximum walkable slope and their radial distance. Every
+sample must still find valid walkable geometry, preserving the wide-floor edge
+fall test. The default walkable slope is now 60 degrees, with a 0.42-unit
+per-tick step-up allowance so the configured run speed can climb that slope at
+60 Hz. When a jump begins while residual uphill velocity is still present, the
+controller holds horizontal movement for a tick if the destination would
+intersect the rising ramp, but continues upward movement when the current
+vertical column is clear. Real ceilings still stop the jump. The default
+walkable limit is 60 degrees and the step-up allowance supports the configured
+run speed at that limit. Regression coverage includes crossing a 45-degree
+ramp-to-flat seam, jumping at the seam, and running/jumping on a 60-degree ramp
+with residual uphill momentum.

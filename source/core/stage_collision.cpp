@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <unordered_map>
+#include <vector>
 
 namespace sdbz
 {
@@ -329,6 +330,33 @@ namespace sdbz
         {
             const float radius = std::max(capsule_radius, 0.0f);
             const float height = std::max(capsule_height, 0.0f);
+
+            // Cross-section radius of a vertical capsule at height y. If the
+            // requested height is shorter than its diameter, treat it as a
+            // sphere whose diameter is the available height.
+            const float cap_radius = std::min(radius, height * 0.5f);
+            const float cylinder_bottom = feet_y + cap_radius;
+            const float cylinder_top = feet_y + height - cap_radius;
+            auto radius_at_y = [&](float y) -> float
+            {
+                if (height <= 2.0f * cap_radius + k_epsilon)
+                {
+                    const float dy = y - (feet_y + height * 0.5f);
+                    return std::sqrt(std::max(0.0f, cap_radius * cap_radius - dy * dy));
+                }
+                if (y < cylinder_bottom)
+                {
+                    const float dy = y - cylinder_bottom;
+                    return std::sqrt(std::max(0.0f, cap_radius * cap_radius - dy * dy));
+                }
+                if (y > cylinder_top)
+                {
+                    const float dy = y - cylinder_top;
+                    return std::sqrt(std::max(0.0f, cap_radius * cap_radius - dy * dy));
+                }
+                return cap_radius;
+            };
+
             const auto candidates = collect_collision_candidates(
                 world, x - radius, z - radius, x + radius, z + radius);
             for (const std::size_t polygon_index : candidates)
@@ -341,8 +369,9 @@ namespace sdbz
                 {
                     continue;
                 }
-                if (polygon.m_bounds_max[1] < feet_y - k_epsilon ||
-                    polygon.m_bounds_min[1] > feet_y + height + k_epsilon)
+                const float overlap_min_y = std::max(feet_y, polygon.m_bounds_min[1]);
+                const float overlap_max_y = std::min(feet_y + height, polygon.m_bounds_max[1]);
+                if (overlap_min_y > overlap_max_y + k_epsilon)
                 {
                     continue;
                 }
@@ -377,7 +406,14 @@ namespace sdbz
                 const auto& origin = polygon.m_vertices.front();
                 const float distance = std::abs(
                     (x - origin[0]) * nx + (z - origin[2]) * nz);
-                if (distance > radius)
+
+                // Use the largest capsule cross-section within the wall's
+                // vertical bounds. height_on_polygon() is not suitable here:
+                // a vertical HIT wall has no single height at a given XZ.
+                const float wall_y = std::clamp(feet_y + height * 0.5f,
+                    overlap_min_y, overlap_max_y);
+                const float effective_radius = radius_at_y(wall_y);
+                if (distance > effective_radius)
                 {
                     continue;
                 }
@@ -392,7 +428,8 @@ namespace sdbz
                     tangent_min = std::min(tangent_min, value);
                     tangent_max = std::max(tangent_max, value);
                 }
-                if (tangent >= tangent_min - radius && tangent <= tangent_max + radius)
+                if (tangent >= tangent_min - effective_radius &&
+                    tangent <= tangent_max + effective_radius)
                 {
                     return false;
                 }
@@ -470,10 +507,44 @@ namespace sdbz
             hit_objects_by_name.emplace(hit.m_objects[index].m_name, index);
         }
 
-        for (const auto& node : stage.m_nodes)
+        // An STG holds template (prototype) roots, an EFFECT root and the live
+        // STAGE root. Only HIT nodes under STAGE are part of the playable
+        // world: template/effect subtrees are stored near the origin and are
+        // never placed in the arena, so letting them into the collision world
+        // made the player spawn on a hidden surface beneath the stage.
+        // Parents precede children in m_nodes, so one forward pass suffices.
+        // Synthetic stages without parsed roots keep every node.
+        const bool has_root_info = !stage.m_roots.empty() &&
+            stage.m_stage_root < stage.m_nodes.size();
+        if (has_root_info && stage.m_stage_root < stage_worlds.size())
         {
+            result.m_stage_origin_y = mat4_point(
+                stage_worlds[stage.m_stage_root], { 0.0f, 0.0f, 0.0f })[1];
+        }
+        std::vector<char> in_stage_root(stage.m_nodes.size(), 0);
+        if (has_root_info)
+        {
+            for (std::size_t i = 0; i < stage.m_nodes.size(); ++i)
+            {
+                const auto& n = stage.m_nodes[i];
+                if (n.m_index == stage.m_stage_root)
+                {
+                    in_stage_root[i] = 1;
+                }
+                else if (n.m_parent >= 0 &&
+                    static_cast<std::size_t>(n.m_parent) < i)
+                {
+                    in_stage_root[i] = in_stage_root[static_cast<std::size_t>(n.m_parent)];
+                }
+            }
+        }
+
+        for (std::size_t node_slot = 0; node_slot < stage.m_nodes.size(); ++node_slot)
+        {
+            const auto& node = stage.m_nodes[node_slot];
             if (node.m_kind != 3 || node.m_references.empty() ||
-                node.m_index >= stage_worlds.size())
+                node.m_index >= stage_worlds.size() ||
+                (has_root_info && !in_stage_root[node_slot]))
             {
                 continue;
             }
@@ -607,6 +678,132 @@ namespace sdbz
         return result;
     }
 
+    [[nodiscard]] std::optional<s_ground_contact> query_stage_ground_capsule(
+        const s_stage_collision_world& world, const float x, const float z,
+        const float reference_y, const float capsule_radius,
+        const float max_step_up, const float max_drop,
+        const float max_slope_degrees)
+    {
+        // A vertical capsule's lowest point is at its centreline. Requiring
+        // every point around its projected radius to overlap a floor polygon
+        // is equivalent to treating the capsule as a flat-bottomed cylinder;
+        // this drops contact on narrow HIT strips, triangle seams and small
+        // gaps even while the actual bottom contact point is over the floor.
+        // Use the exact centre query as the reference point; the footprint
+        // check below remains authoritative for wide floors near their edges.
+        const auto centre = query_stage_ground(world, x, z, reference_y,
+            max_step_up, max_drop, max_slope_degrees);
+        const float radius = std::max(capsule_radius, 0.0f);
+        if (centre)
+        {
+            if (is_stage_capsule_supported(world, x, z, centre->m_position[1],
+                    radius, max_slope_degrees))
+            {
+                return centre;
+            }
+
+            // A narrow, elongated HIT surface can legitimately support a
+            // capsule at its centreline even though a flat disk of radius R
+            // would overhang both sides. This is common for authored strips
+            // and rails. Do not apply this exception to a wide floor near its
+            // edge: there the footprint check still causes an edge fall.
+            if (centre->m_collision_polygon_index < world.m_polygons.size() &&
+                radius > k_epsilon)
+            {
+                const auto& polygon = world.m_polygons[centre->m_collision_polygon_index];
+                const float extent_x = polygon.m_bounds_max[0] - polygon.m_bounds_min[0];
+                const float extent_z = polygon.m_bounds_max[2] - polygon.m_bounds_min[2];
+                const float narrow_extent = std::min(extent_x, extent_z);
+                const float centre_clearance = distance_to_polygon_edge_xz(
+                    polygon.m_vertices, x, z);
+                if (narrow_extent <= radius * 2.0f + 0.01f &&
+                    centre_clearance >= radius * 0.45f)
+                {
+                    return centre;
+                }
+            }
+            return std::nullopt;
+        }
+
+        // HIT floors can contain tiny cracks between independently authored
+        // polygons. If the centre falls exactly into one, reconstruct its
+        // support height from a majority of nearby samples on the same plane.
+        // This is only a seam fallback: a single polygon at the edge cannot
+        // keep the player grounded once the centre has left its support.
+        if (radius <= k_epsilon)
+        {
+            return std::nullopt;
+        }
+
+        struct s_nearby_support
+        {
+            s_ground_contact m_contact;
+            float m_centre_y = 0.0f;
+        };
+        std::vector<s_nearby_support> supports;
+        constexpr int k_ring_samples = 16;
+        constexpr float k_two_pi = 6.28318530717958647692f;
+        const float sample_radius = radius * 0.85f;
+        const float expanded_step_up = std::max(max_step_up, 0.0f) + radius;
+        const float expanded_drop = std::max(max_drop, 0.0f) + radius;
+        supports.reserve(k_ring_samples);
+
+        for (int sample_index = 0; sample_index < k_ring_samples; ++sample_index)
+        {
+            const float angle = k_two_pi * static_cast<float>(sample_index) /
+                static_cast<float>(k_ring_samples);
+            const float sample_x = x + std::cos(angle) * sample_radius;
+            const float sample_z = z + std::sin(angle) * sample_radius;
+            const auto contact = query_stage_ground(world, sample_x, sample_z,
+                reference_y, expanded_step_up, expanded_drop, max_slope_degrees);
+            if (!contact || contact->m_normal[1] <= k_epsilon)
+            {
+                continue;
+            }
+
+            const float centre_y = contact->m_position[1] +
+                (contact->m_normal[0] * (sample_x - x) +
+                    contact->m_normal[2] * (sample_z - z)) / contact->m_normal[1];
+            if (!std::isfinite(centre_y) ||
+                centre_y > reference_y + expanded_step_up ||
+                centre_y < reference_y - expanded_drop)
+            {
+                continue;
+            }
+            supports.push_back({ *contact, centre_y });
+        }
+
+        // A majority is required so a nearby wall top or isolated adjacent
+        // platform cannot manufacture a ground contact across an open gap.
+        if (supports.size() < static_cast<std::size_t>(k_ring_samples / 2))
+        {
+            return std::nullopt;
+        }
+        std::sort(supports.begin(), supports.end(),
+            [](const s_nearby_support& a, const s_nearby_support& b)
+            {
+                return a.m_centre_y < b.m_centre_y;
+            });
+        const auto& median = supports[supports.size() / 2];
+        const float height_tolerance = std::max(0.12f, radius * 0.5f);
+        std::size_t matching_count = 0;
+        for (const auto& support : supports)
+        {
+            if (std::abs(support.m_centre_y - median.m_centre_y) <= height_tolerance)
+            {
+                ++matching_count;
+            }
+        }
+        if (matching_count < static_cast<std::size_t>(k_ring_samples / 2))
+        {
+            return std::nullopt;
+        }
+
+        s_ground_contact result = median.m_contact;
+        result.m_position = { x, median.m_centre_y, z };
+        return result;
+    }
+
     std::optional<s_player_spawn> find_stage_player_spawn(
         const s_stage_collision_world& world, const float foot_offset,
         const float max_slope_degrees, const float capsule_radius,
@@ -614,53 +811,160 @@ namespace sdbz
     {
         const float minimum_normal_y = std::cos(
             std::clamp(max_slope_degrees, 0.0f, 89.0f) * k_degrees_to_radians);
-        (void)capsule_radius;
-        (void)capsule_height;
+
+        // Spawn candidates are ranked against the live STAGE root origin, not
+        // absolute world Y=0. The STAGE root may itself be translated in the
+        // world. Prefer the nearest valid surface height first, then deep
+        // interior clearance and the largest playable footprint. HIT object names
+        // are retained for diagnostics but are not assigned guessed semantics.
+        struct s_rank
+        {
+            float m_height_delta = 0.0f;
+            float m_clearance = 0.0f;
+            float m_area = 0.0f;
+        };
+        const auto is_better = [](const s_rank& a, const s_rank& b)
+        {
+            if (a.m_height_delta != b.m_height_delta)
+            {
+                return a.m_height_delta < b.m_height_delta;
+            }
+            if (a.m_clearance != b.m_clearance)
+            {
+                return a.m_clearance > b.m_clearance;
+            }
+            return a.m_area > b.m_area;
+        };
+
+        struct s_point
+        {
+            float m_x = 0.0f;
+            float m_z = 0.0f;
+            float m_y = 0.0f;
+            float m_clearance = 0.0f;
+            float m_height_delta = 0.0f;
+        };
+
         std::optional<s_player_spawn> result;
-        float best_area = 0.0f;
+        s_rank best_rank;
+        constexpr int k_max_points_per_polygon = 48;
+        const float reference_y = world.m_stage_origin_y;
+
         for (std::size_t index = 0; index < world.m_polygons.size(); ++index)
         {
             const auto& polygon = world.m_polygons[index];
-            if (!is_walkable(polygon, minimum_normal_y))
+            if (!is_walkable(polygon, minimum_normal_y) || polygon.m_vertices.size() < 3)
             {
                 continue;
             }
-            const std::string& object_name = polygon.m_object_name;
-            const bool is_regular_floor =
-                object_name.size() >= 3 &&
-                object_name.compare(object_name.size() - 3, 3, "Flr") == 0 &&
-                !(object_name.size() >= 4 &&
-                  object_name.compare(object_name.size() - 4, 4, "BFlr") == 0);
-            if (!is_regular_floor)
+
+            // The polygon's vertical bounds provide a safe lower bound on its
+            // possible distance from the stage origin. This avoids running
+            // capsule tests on surfaces that cannot beat the current result.
+            float minimum_height_delta = 0.0f;
+            if (reference_y < polygon.m_bounds_min[1])
+            {
+                minimum_height_delta = polygon.m_bounds_min[1] - reference_y;
+            }
+            else if (reference_y > polygon.m_bounds_max[1])
+            {
+                minimum_height_delta = reference_y - polygon.m_bounds_max[1];
+            }
+            if (result && minimum_height_delta > best_rank.m_height_delta + 0.001f)
             {
                 continue;
             }
-            float cx = 0.0f, cy = 0.0f, cz = 0.0f;
-            for (const auto& v : polygon.m_vertices)
+
+            std::vector<s_point> points;
+            points.reserve(1 + 11 * 11);
+            const auto add_point = [&](const float x, const float z)
             {
-                cx += v[0];
-                cy += v[1];
-                cz += v[2];
-            }
-            const float inv = 1.0f / static_cast<float>(polygon.m_vertices.size());
-            cx *= inv;
-            cy *= inv;
-            cz *= inv;
-            if (std::abs(cy) > 2.0f)
-            {
-                continue;
-            }
-            if (polygon.m_projected_area <= best_area)
-            {
-                continue;
-            }
-            best_area = polygon.m_projected_area;
-            result = s_player_spawn{
-                { cx, cy + foot_offset, cz },
-                polygon.m_normal, index, polygon.m_stage_node_index,
-                polygon.m_hit_object_index, polygon.m_projected_area,
-                polygon.m_object_name
+                float surface_y = 0.0f;
+                if (!height_on_polygon(polygon, x, z, surface_y))
+                {
+                    return;
+                }
+                const float clearance = distance_to_polygon_edge_xz(
+                    polygon.m_vertices, x, z);
+                const float height_delta = std::abs(surface_y - reference_y);
+                const auto duplicate = std::find_if(points.begin(), points.end(),
+                    [&](const s_point& point)
+                    {
+                        const float dx = point.m_x - x;
+                        const float dz = point.m_z - z;
+                        return dx * dx + dz * dz <= 1.0e-6f;
+                    });
+                if (duplicate == points.end())
+                {
+                    points.push_back({ x, z, surface_y, clearance, height_delta });
+                }
             };
+
+            if (const auto interior = find_polygon_interior_point(polygon))
+            {
+                add_point((*interior)[0], (*interior)[1]);
+            }
+
+            constexpr int k_steps = 12;
+            for (int zi = 1; zi < k_steps; ++zi)
+            {
+                const float z = polygon.m_bounds_min[2] +
+                    (polygon.m_bounds_max[2] - polygon.m_bounds_min[2]) *
+                    (static_cast<float>(zi) / static_cast<float>(k_steps));
+                for (int xi = 1; xi < k_steps; ++xi)
+                {
+                    const float x = polygon.m_bounds_min[0] +
+                        (polygon.m_bounds_max[0] - polygon.m_bounds_min[0]) *
+                        (static_cast<float>(xi) / static_cast<float>(k_steps));
+                    if (point_in_polygon_xz(polygon.m_vertices, x, z))
+                    {
+                        add_point(x, z);
+                    }
+                }
+            }
+
+            std::sort(points.begin(), points.end(),
+                [](const s_point& a, const s_point& b)
+                {
+                    if (a.m_height_delta != b.m_height_delta)
+                    {
+                        return a.m_height_delta < b.m_height_delta;
+                    }
+                    return a.m_clearance > b.m_clearance;
+                });
+
+            const std::size_t point_count = std::min(
+                points.size(), static_cast<std::size_t>(k_max_points_per_polygon));
+            for (std::size_t point_index = 0; point_index < point_count; ++point_index)
+            {
+                const auto& point = points[point_index];
+                s_rank rank;
+                rank.m_height_delta = point.m_height_delta;
+                rank.m_clearance = point.m_clearance;
+                rank.m_area = polygon.m_projected_area;
+                if (result && !is_better(rank, best_rank))
+                {
+                    // Candidate points are ordered by height delta and
+                    // clearance, so later points on this polygon cannot win.
+                    break;
+                }
+                if (!is_stage_capsule_supported(world, point.m_x, point.m_z, point.m_y,
+                        capsule_radius, max_slope_degrees) ||
+                    !is_stage_capsule_clear(world, point.m_x, point.m_z, point.m_y,
+                        capsule_radius, capsule_height, max_slope_degrees))
+                {
+                    continue;
+                }
+
+                best_rank = rank;
+                result = s_player_spawn{
+                    { point.m_x, point.m_y + foot_offset, point.m_z },
+                    polygon.m_normal, index, polygon.m_stage_node_index,
+                    polygon.m_hit_object_index, polygon.m_projected_area,
+                    polygon.m_object_name
+                };
+                break;
+            }
         }
         return result;
     }
@@ -703,13 +1007,24 @@ namespace sdbz
         // Sample two rings. Queries are against the complete collision world,
         // not just the centre polygon, so adjacent triangles/quads can jointly
         // support a player whose capsule straddles their shared seam.
+        //
+        // Do not require neighbouring polygons to have nearly identical
+        // normals: authored HIT ramps commonly meet flat floors or other
+        // walkable ramps at a sharp, but continuous, crease. Instead, permit
+        // the height difference that a walkable surface can produce over this
+        // sample's horizontal distance. Every sample must still find a
+        // walkable surface, which preserves ledge detection.
         constexpr int k_inner_samples = 12;
         constexpr int k_outer_samples = 24;
         constexpr float k_two_pi = 6.28318530717958647692f;
-        constexpr float k_minimum_normal_dot = 0.80f;
+        const float maximum_slope = std::clamp(max_slope_degrees, 0.0f, 89.0f) *
+            k_degrees_to_radians;
+        const float maximum_slope_gradient = std::tan(maximum_slope);
         for (int ring = 0; ring < 2; ++ring)
         {
             const float ring_radius = radius * (ring == 0 ? 0.5f : 0.98f);
+            const float sample_tolerance = std::max(
+                tolerance, ring_radius * maximum_slope_gradient);
             const int sample_count = ring == 0 ? k_inner_samples : k_outer_samples;
             for (int sample_index = 0; sample_index < sample_count; ++sample_index)
             {
@@ -721,16 +1036,10 @@ namespace sdbz
                     (centre->m_normal[0] * offset_x +
                         centre->m_normal[2] * offset_z) / normal_y;
                 const auto sample = query_stage_ground(world, x + offset_x,
-                    z + offset_z, expected_y, tolerance, tolerance, max_slope_degrees);
-                if (!sample || std::abs(sample->m_position[1] - expected_y) > tolerance)
-                {
-                    return false;
-                }
-                const float normal_dot =
-                    centre->m_normal[0] * sample->m_normal[0] +
-                    centre->m_normal[1] * sample->m_normal[1] +
-                    centre->m_normal[2] * sample->m_normal[2];
-                if (normal_dot < k_minimum_normal_dot)
+                    z + offset_z, expected_y, sample_tolerance,
+                    sample_tolerance, max_slope_degrees);
+                if (!sample ||
+                    std::abs(sample->m_position[1] - expected_y) > sample_tolerance)
                 {
                     return false;
                 }

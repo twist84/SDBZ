@@ -43,17 +43,20 @@ namespace sdbz
         {
             return;
         }
-        const float delta = wheel_steps * distance_per_step;
-        const float candidate = camera.m_orbit_distance - delta;
-        if (std::abs(candidate) < k_minimum_orbit_distance)
+        const double candidate = static_cast<double>(camera.m_orbit_distance) -
+            static_cast<double>(wheel_steps) * static_cast<double>(distance_per_step);
+        if (!std::isfinite(candidate))
         {
-            camera.m_orbit_distance = sign_nonzero(candidate == 0.0f ? -delta : candidate) *
-                k_minimum_orbit_distance;
+            return;
         }
-        else
-        {
-            camera.m_orbit_distance = candidate;
-        }
+
+        // Keep the signed distance continuous. Clamping it here would prevent
+        // high-resolution wheel events from accumulating enough movement to
+        // cross zero. The pose calculation applies a small render-only offset
+        // around the look-at singularity.
+        constexpr double k_maximum_orbit_distance = 1000000.0;
+        camera.m_orbit_distance = static_cast<float>(std::clamp(candidate,
+            -k_maximum_orbit_distance, k_maximum_orbit_distance));
     }
 
     s_camera_pose calculate_camera_pose(const s_camera& camera)

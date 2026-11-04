@@ -33,6 +33,10 @@ namespace sdbz
         std::vector<s_stage_collision_polygon> m_polygons;
         std::size_t m_unresolved_references = 0;
         std::size_t m_degenerate_polygons = 0;
+        // World-space Y of the live STAGE root origin. Spawn selection uses
+        // this as its vertical reference instead of assuming every arena is
+        // centred on world Y=0.
+        float m_stage_origin_y = 0.0f;
 
         // Uniform XZ broad-phase grid. Each polygon is stored in every cell
         // touched by its world-space bounds. Very large polygons are kept in
@@ -72,30 +76,42 @@ namespace sdbz
     void build_stage_collision_spatial_index(
         s_stage_collision_world& world, float cell_size = 8.0f);
 
+    // Default gameplay support accepts walkable surfaces up to 60 degrees;
+    // near-vertical HIT polygons continue to be handled as blocking walls.
     [[nodiscard]] std::optional<s_ground_contact> query_stage_ground(
         const s_stage_collision_world& world, float x, float z, float reference_y,
         float max_step_up = 0.35f, float max_drop = 2.0f,
-        float max_slope_degrees = 50.0f);
+        float max_slope_degrees = 60.0f);
+
+    // Queries the ground directly beneath the capsule centre, then validates
+    // that the complete sampled footprint is supported across the collision
+    // world. The returned contact remains at the capsule centre (important on
+    // sloped surfaces and across polygon seams).
+    [[nodiscard]] std::optional<s_ground_contact> query_stage_ground_capsule(
+        const s_stage_collision_world& world, float x, float z,
+        float reference_y, float capsule_radius,
+        float max_step_up = 0.35f, float max_drop = 2.0f,
+        float max_slope_degrees = 60.0f);
 
     [[nodiscard]] std::optional<s_player_spawn> find_stage_player_spawn(
         const s_stage_collision_world& world, float foot_offset = 0.05f,
-        float max_slope_degrees = 50.0f, float capsule_radius = 0.35f,
+        float max_slope_degrees = 60.0f, float capsule_radius = 0.35f,
         float capsule_height = 1.75f);
 
     [[nodiscard]] bool is_stage_capsule_clear(
         const s_stage_collision_world& world, float x, float z, float feet_y,
         float capsule_radius = 0.35f, float capsule_height = 1.75f,
-        float max_slope_degrees = 50.0f);
+        float max_slope_degrees = 60.0f);
 
     // Verifies that the complete sampled footprint is supported, allowing a
     // capsule to stand across seams between adjacent HIT polygons.
     [[nodiscard]] bool is_stage_capsule_supported(
         const s_stage_collision_world& world, float x, float z, float surface_y,
-        float capsule_radius = 0.35f, float max_slope_degrees = 50.0f,
+        float capsule_radius = 0.35f, float max_slope_degrees = 60.0f,
         float surface_tolerance = 0.16f);
 
     [[nodiscard]] std::array<float, 2> resolve_stage_horizontal_movement(
         const s_stage_collision_world& world, float start_x, float start_z,
         float target_x, float target_z, float feet_y, float capsule_radius = 0.35f,
-        float capsule_height = 1.75f, float max_slope_degrees = 50.0f);
+        float capsule_height = 1.75f, float max_slope_degrees = 60.0f);
 }
