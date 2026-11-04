@@ -7,6 +7,44 @@
 #include <string>
 #include <string_view>
 
+
+namespace
+{
+    struct s_archive_path_parts
+    {
+        std::string m_directory;
+        std::string m_filename;
+        std::string m_stem;
+        std::string m_extension;
+    };
+
+    s_archive_path_parts split_archive_path(std::string_view path)
+    {
+        std::string normalized(path);
+        std::replace(normalized.begin(), normalized.end(), '\\', '/');
+        normalized = lower_copy(std::move(normalized));
+
+        const std::size_t slash = normalized.find_last_of('/');
+        const std::size_t filename_offset =
+            slash == std::string::npos ? 0 : slash + 1;
+        const std::string filename = normalized.substr(filename_offset);
+        const std::size_t dot = filename.find_last_of('.');
+
+        s_archive_path_parts result;
+        result.m_directory = slash == std::string::npos
+            ? std::string()
+            : normalized.substr(0, slash);
+        result.m_filename = filename;
+        result.m_stem = dot == std::string::npos
+            ? filename
+            : filename.substr(0, dot);
+        result.m_extension = dot == std::string::npos
+            ? std::string()
+            : filename.substr(dot);
+        return result;
+    }
+}
+
 std::string lower_copy(std::string text)
 {
     std::transform(text.begin(), text.end(), text.begin(),
@@ -79,6 +117,81 @@ std::vector<fs::path> find_motions_for(const fs::path& model_path)
     {
         if (lower_copy(candidate.stem().string()).rfind(prefix, 0) == 0) matching.push_back(candidate);
     }
+    return matching.empty() ? all : matching;
+}
+
+const sdbz::s_archive_entry* find_archive_texture_for(
+    const sdbz::s_archive& archive, const std::string_view model_name)
+{
+    const s_archive_path_parts model = split_archive_path(model_name);
+    const std::string prefix = character_prefix(model.m_stem);
+    const sdbz::s_archive_entry* prefix_match = nullptr;
+    std::string prefix_match_filename;
+
+    for (const auto& entry : archive.m_entries)
+    {
+        if (entry.m_is_directory)
+        {
+            continue;
+        }
+        const s_archive_path_parts candidate = split_archive_path(entry.m_name_cp932);
+        if (candidate.m_directory != model.m_directory ||
+            candidate.m_extension != ".pix")
+        {
+            continue;
+        }
+        if (candidate.m_stem == model.m_stem)
+        {
+            return &entry;
+        }
+        if (!prefix.empty() && candidate.m_stem.rfind(prefix, 0) == 0 &&
+            (prefix_match == nullptr || candidate.m_filename < prefix_match_filename))
+        {
+            prefix_match = &entry;
+            prefix_match_filename = candidate.m_filename;
+        }
+    }
+
+    return prefix_match;
+}
+
+std::vector<const sdbz::s_archive_entry*> find_archive_motions_for(
+    const sdbz::s_archive& archive, const std::string_view model_name)
+{
+    const s_archive_path_parts model = split_archive_path(model_name);
+    const std::string prefix = character_prefix(model.m_stem);
+    std::vector<const sdbz::s_archive_entry*> all;
+    std::vector<const sdbz::s_archive_entry*> matching;
+
+    for (const auto& entry : archive.m_entries)
+    {
+        if (entry.m_is_directory)
+        {
+            continue;
+        }
+        const s_archive_path_parts candidate = split_archive_path(entry.m_name_cp932);
+        if (candidate.m_directory != model.m_directory ||
+            candidate.m_extension != ".pmt")
+        {
+            continue;
+        }
+
+        all.push_back(&entry);
+        if (!prefix.empty() && candidate.m_stem.rfind(prefix, 0) == 0)
+        {
+            matching.push_back(&entry);
+        }
+    }
+
+    const auto sort_entries = [](auto& entries)
+    {
+        std::sort(entries.begin(), entries.end(), [](const auto* left, const auto* right)
+        {
+            return lower_copy(left->m_name_cp932) < lower_copy(right->m_name_cp932);
+        });
+    };
+    sort_entries(all);
+    sort_entries(matching);
     return matching.empty() ? all : matching;
 }
 

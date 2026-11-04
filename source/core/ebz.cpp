@@ -2,6 +2,7 @@
 #include "core/binary_reader.hpp"
 
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string>
 #include <vector>
@@ -72,9 +73,9 @@ namespace sdbz
 
             s_ebz_entry entry;
             entry.m_index = i;
-            for (int fi = 0; fi < 28; ++fi)
+            for (std::size_t fi = 0; fi < entry.m_fields.size(); ++fi)
             {
-                entry.m_fields[fi] = read_u32_le(data, eoff + fi * 4).value();
+                entry.m_fields[fi] = read_u32_le(data, eoff + fi * sizeof(std::uint32_t)).value();
             }
             result.m_entries.push_back(entry);
         }

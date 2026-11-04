@@ -15,18 +15,6 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-REM Create build directory if it doesn't exist
-if not exist "build-game" mkdir build-game
-pushd build-game
-
-REM Configure CMake with C++23 standard
-cmake .. -DCMAKE_BUILD_TYPE=Release -DSDBZ_BUILD_GAME=ON
-
-REM Build the project
-cmake --build . --target sdbz_game
-
-popd
-
 echo.
 echo Build completed successfully!
 echo.
@@ -60,12 +48,12 @@ goto :menu
 
 :opt_game
 echo Running game...
-if exist "build-game\Release\sdbz_game.exe" (
-    "build-game\Release\sdbz_game.exe"
-) else if exist "build-game\Debug\sdbz_game.exe" (
-    "build-game\Debug\sdbz_game.exe"
-) else if exist "build-game\sdbz_game.exe" (
-    "build-game\sdbz_game.exe"
+if exist "build\Release\sdbz_game.exe" (
+    "build\Release\sdbz_game.exe"
+) else if exist "build\Debug\sdbz_game.exe" (
+    "build\Debug\sdbz_game.exe"
+) else if exist "build\sdbz_game.exe" (
+    "build\sdbz_game.exe"
 ) else (
     echo Error: Game executable not found!
     echo Make sure the game was built.

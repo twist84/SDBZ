@@ -21,21 +21,13 @@
 #include "core/model.hpp"
 #include "core/stage.hpp"
 #include "core/texture.hpp"
+#include "gameplay/player_controller.hpp"
+#include "gameplay/camera.hpp"
 
 #include "interface/debug_menu/debug_menu.hpp"
 #include "interface/part_groups.hpp"
 
 namespace fs = std::filesystem;
-
-// Camera state shared between platform input and the renderer.
-struct s_camera
-{
-    float m_yaw = 0.0f;
-    float m_pitch = 0.0f;
-    float m_distance = 6.0f;
-    std::array<float, 3> m_target{ 0.0f, 0.0f, 0.0f };
-    bool m_framed = false; // auto-fit once; F re-fits
-};
 
 // All state required to render a viewer frame. Pointers are non-owning.
 struct s_draw_context
@@ -44,7 +36,12 @@ struct s_draw_context
     int drawable_width = 0;
     int drawable_height = 0;
 
-    const s_camera* camera = nullptr;
+    const sdbz::s_camera* camera = nullptr; // active render camera (viewer or gameplay)
+    const sdbz::s_camera* viewer_camera = nullptr; // auto-framing always targets this camera
+    const sdbz::s_player_controller* player_controller = nullptr;
+    const sdbz::s_stage_collision_world* stage_collision_world = nullptr;
+    bool player_controller_active = false;
+    bool player_actor_placed = false;
 
     // Debug menu system (owned by platform layer).
     sdbz::s_debug_menu debug;

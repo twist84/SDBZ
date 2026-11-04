@@ -27,6 +27,7 @@ add_library(sdbz_core STATIC
     source/core/model.cpp
     source/core/animation.cpp
     source/core/stage.cpp
+    source/core/stage_collision.cpp
     source/core/ebz.cpp
     source/core/ase.cpp
     source/core/ams.cpp
@@ -34,6 +35,10 @@ add_library(sdbz_core STATIC
     source/core/cht.cpp
     source/core/spt.cpp
     source/core/audio/adpcm.cpp
+    source/gameplay/player_controller.cpp
+    source/gameplay/player_animation.cpp
+    source/gameplay/player_spawn.cpp
+    source/gameplay/camera.cpp
 )
 target_include_directories(sdbz_core PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/source"
@@ -59,6 +64,36 @@ if(SDBZ_BUILD_TESTS)
     target_compile_definitions(sdbz_tests PRIVATE
         SDBZ_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
     )
+
+    add_executable(sdbz_player_tests
+        tests/test_player_controller.cpp
+    )
+    target_link_libraries(sdbz_player_tests PRIVATE sdbz_core)
+    add_test(NAME player_controller COMMAND sdbz_player_tests)
+
+    add_executable(sdbz_stage_collision_tests
+        tests/test_stage_collision.cpp
+    )
+    target_link_libraries(sdbz_stage_collision_tests PRIVATE sdbz_core)
+    add_test(NAME stage_collision COMMAND sdbz_stage_collision_tests)
+
+    add_executable(sdbz_player_spawn_tests
+        tests/test_player_spawn.cpp
+    )
+    target_link_libraries(sdbz_player_spawn_tests PRIVATE sdbz_core)
+    add_test(NAME player_spawn COMMAND sdbz_player_spawn_tests)
+
+    add_executable(sdbz_player_animation_tests
+        tests/test_player_animation.cpp
+    )
+    target_link_libraries(sdbz_player_animation_tests PRIVATE sdbz_core)
+    add_test(NAME player_animation COMMAND sdbz_player_animation_tests)
+
+    add_executable(sdbz_camera_tests
+        tests/test_camera.cpp
+    )
+    target_link_libraries(sdbz_camera_tests PRIVATE sdbz_core)
+    add_test(NAME gameplay_camera COMMAND sdbz_camera_tests)
 endif()
 
 if(SDBZ_BUILD_GAME)

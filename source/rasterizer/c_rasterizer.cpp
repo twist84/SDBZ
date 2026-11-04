@@ -46,6 +46,12 @@ void c_rasterizer::ortho(GLdouble left, GLdouble right, GLdouble bottom, GLdoubl
     ::glOrtho(left, right, bottom, top, z_near, z_far);
 }
 
+void c_rasterizer::frustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top,
+                           GLdouble z_near, GLdouble z_far)
+{
+    ::glFrustum(left, right, bottom, top, z_near, z_far);
+}
+
 void c_rasterizer::rotate(GLfloat angle, GLfloat x, GLfloat y, GLfloat z)
 {
     ::glRotatef(angle, x, y, z);

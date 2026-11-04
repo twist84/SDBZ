@@ -33,6 +33,8 @@ public:
     static void load_identity();
     static void ortho(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top,
                       GLdouble z_near, GLdouble z_far);
+    static void frustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top,
+                        GLdouble z_near, GLdouble z_far);
     static void rotate(GLfloat angle, GLfloat x, GLfloat y, GLfloat z);
     static void translate(GLfloat x, GLfloat y, GLfloat z);
     static void alpha_func(GLenum func, GLclampf ref);

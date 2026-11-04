@@ -12,6 +12,7 @@
 
 #include "core/binary_reader.hpp"
 #include "core/container.hpp"
+#include "core/info_archive.hpp"
 #include "core/texture.hpp"
 
 namespace fs = std::filesystem;
@@ -60,6 +61,13 @@ std::string character_prefix(const std::string& stem);
 // Motion packages (.pmt) beside the model: those sharing the character prefix
 // (p01a.mdl -> p01sel.pmt, p01act.pmt), or every .pmt in the folder if none match.
 [[nodiscard]] std::vector<fs::path> find_motions_for(const fs::path& model_path);
+
+// Archive equivalents of the disk companion lookups above. Returned pointers
+// refer to entries owned by `archive` and remain valid while it is unchanged.
+[[nodiscard]] const sdbz::s_archive_entry* find_archive_texture_for(
+    const sdbz::s_archive& archive, std::string_view model_name);
+[[nodiscard]] std::vector<const sdbz::s_archive_entry*> find_archive_motions_for(
+    const sdbz::s_archive& archive, std::string_view model_name);
 
 // Look for a .fon near the model: its folder and a few parents, a few levels deep each.
 [[nodiscard]] fs::path find_font_near(const fs::path& start);

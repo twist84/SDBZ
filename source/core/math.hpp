@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 
 namespace sdbz
 {
@@ -10,12 +11,12 @@ namespace sdbz
     [[nodiscard]] inline mat4 mat4_mul(const mat4& a, const mat4& b)
     {
         mat4 out{};
-        for (int row = 0; row < 4; ++row)
+        for (std::size_t row = 0; row < 4; ++row)
         {
-            for (int col = 0; col < 4; ++col)
+            for (std::size_t col = 0; col < 4; ++col)
             {
                 float v = 0.0f;
-                for (int k = 0; k < 4; ++k) v += a[row * 4 + k] * b[k * 4 + col];
+                for (std::size_t k = 0; k < 4; ++k) v += a[row * 4 + k] * b[k * 4 + col];
                 out[row * 4 + col] = v;
             }
         }

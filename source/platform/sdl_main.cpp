@@ -11,11 +11,14 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <print>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -24,7 +27,10 @@
 #include "core/math.hpp"
 #include "core/model.hpp"
 #include "core/stage.hpp"
+#include "core/stage_collision.hpp"
 #include "core/texture.hpp"
+#include "gameplay/player_animation.hpp"
+#include "gameplay/player_spawn.hpp"
 
 #include "platform/event.hpp"
 #include "platform/window.hpp"
@@ -33,6 +39,22 @@
 #include "render/renderer.hpp"
 
 namespace fs = std::filesystem;
+
+namespace
+{
+float gamepad_axis_to_input(const Sint16 axis)
+{
+    constexpr float k_deadzone = 0.18f;
+    const float value = std::clamp(static_cast<float>(axis) / 32767.0f, -1.0f, 1.0f);
+    const float magnitude = std::abs(value);
+    if (magnitude <= k_deadzone)
+    {
+        return 0.0f;
+    }
+    const float remapped = (magnitude - k_deadzone) / (1.0f - k_deadzone);
+    return std::copysign(remapped, value);
+}
+} // namespace
 
 int main(int argc, char** argv)
 {
@@ -164,12 +186,9 @@ int main(int argc, char** argv)
                     has_loaded_archive = true;
                     game_data = sdbz::read_file(fallback_game);
                     has_game_data = true;
-                    {
-                        std::println("Loaded archive fallback: {} ({}) entries) + {} ({} bytes)",
-                                     fallback_info.string(), loaded_archive.m_entries.size(), fallback_game.string(),
-                                     game_data.size());
-                        break;
-                    }
+                    std::println("Loaded archive fallback: {} ({} entries) + {} ({} bytes)", fallback_info.string(),
+                                 loaded_archive.m_entries.size(), fallback_game.string(), game_data.size());
+                    break;
                 }
                 catch (const std::exception& exception)
                 {
@@ -217,6 +236,7 @@ int main(int argc, char** argv)
     std::vector<std::vector<char>> stage_groups;
     std::vector<std::unordered_map<std::string, std::vector<std::size_t>>> stage_meshes_by_names;
     std::vector<std::unordered_map<std::string, std::size_t>> stage_hit_by_names;
+    std::vector<sdbz::s_stage_collision_world> stage_collision_worlds;
     std::vector<std::vector<GLuint>> stage_mesh_lists;
     bool show_effect = false;
     bool show_templates = false;
@@ -670,7 +690,22 @@ int main(int argc, char** argv)
     }
     std::println("SDL init done");
 
-    SDL_Gamepad* gamepad = SDL_OpenGamepad(0);
+    SDL_Gamepad* gamepad = nullptr;
+    int gamepad_count = 0;
+    SDL_JoystickID* gamepad_ids = SDL_GetGamepads(&gamepad_count);
+    if (gamepad_ids)
+    {
+        for (int gamepad_index = 0; gamepad_index < gamepad_count; ++gamepad_index)
+        {
+            gamepad = SDL_OpenGamepad(gamepad_ids[gamepad_index]);
+            if (gamepad)
+            {
+                std::println("Gamepad connected: {}", SDL_GetGamepadName(gamepad));
+                break;
+            }
+        }
+        SDL_free(gamepad_ids);
+    }
 
     // Load stage textures AFTER OpenGL context is created.
     for (std::size_t si = 0; si < stage_textures.size(); ++si)
@@ -715,15 +750,396 @@ int main(int argc, char** argv)
         }
     }
 
-    // ---- Viewer context + camera ----
-    s_camera camera;
+    // ---- Viewer context, camera and provisional player controller ----
+    sdbz::s_camera camera;
+    sdbz::s_camera player_camera;
+    player_camera.m_perspective = true;
+    player_camera.m_orbit_distance = 8.0f;
+    player_camera.m_vertical_fov_degrees = 55.0f;
+    player_camera.m_pitch = 12.0f;
+    player_camera.m_follow_offset = {0.0f, 1.35f, 0.0f};
+    sdbz::s_player_controller player_controller;
+    bool player_controller_active = false;
+    bool player_actor_placed = false;
+    bool player_spawn_valid = false;
+    bool default_player_model_loaded = false;
+    bool camera_follow_player = false;
+    bool player_jump_requested = false;
+    float player_land_animation_remaining = 0.0f;
+    std::optional<sdbz::e_player_animation_state> active_player_animation_state;
+    const auto player_spawn_overrides = sdbz::load_player_spawn_overrides("player_spawns.cfg");
+    if (!player_spawn_overrides.empty())
+    {
+        std::println("Loaded {} player spawn override(s) from player_spawns.cfg", player_spawn_overrides.size());
+    }
     sdbz::s_debug_menu debug_menu;
     bool vfs_open = false;
     int vfs_selected = 0;
     std::vector<std::string> vfs_path_components;
+
+    // Load a model selected from the VFS, including its companion texture and
+    // motion packages. Both manual VFS model selection and automatic player
+    // loading use this path so their behaviour stays identical.
+    auto load_archive_model = [&](const sdbz::s_archive_entry& model_entry)
+    {
+        const std::uint64_t model_offset = model_entry.offset();
+        const std::uint64_t model_size = model_entry.m_byte_size;
+        if (model_offset > game_data.size() || model_size > game_data.size() - model_offset)
+        {
+            throw std::out_of_range("model entry is outside GAME.DAT");
+        }
+
+        const std::span<const std::uint8_t> model_data(game_data.data() + model_offset,
+                                                       static_cast<std::size_t>(model_size));
+        const std::string model_name = fs::path(model_entry.m_name_cp932).stem().string();
+        loaded_model = sdbz::parse_fmdl(model_data, model_name);
+        has_loaded_model = true;
+
+        mesh_visible.assign(loaded_model.m_meshes.size(), false);
+        part_groups.clear();
+        for (std::size_t mi = 0; mi < loaded_model.m_meshes.size(); ++mi)
+        {
+            const auto& mesh_name = loaded_model.m_meshes[mi].m_name;
+            const std::string label = part_base_name(mesh_name);
+            auto it = std::find_if(part_groups.begin(), part_groups.end(),
+                                   [&](const s_part_group& group) { return group.m_label == label; });
+            if (it == part_groups.end())
+            {
+                part_groups.push_back({label, {}, 0});
+                it = part_groups.end() - 1;
+            }
+            it->m_meshes.push_back(mi);
+        }
+        apply_part_visibility(part_groups, mesh_visible);
+        std::println("Loaded model from archive: {}", model_entry.m_name_cp932);
+
+        for (const GLuint texture : texture_names)
+        {
+            if (texture)
+            {
+                glDeleteTextures(1, &texture);
+            }
+        }
+        texture_names.clear();
+        has_textures = false;
+
+        if (const auto* texture_entry = find_archive_texture_for(loaded_archive, model_entry.m_name_cp932))
+        {
+            const std::uint64_t texture_offset = texture_entry->offset();
+            const std::uint64_t texture_size = texture_entry->m_byte_size;
+            if (texture_offset <= game_data.size() && texture_size <= game_data.size() - texture_offset)
+            {
+                try
+                {
+                    const std::span<const std::uint8_t> texture_data(game_data.data() + texture_offset,
+                                                                     static_cast<std::size_t>(texture_size));
+                    texture_names =
+                        load_fpix_textures(std::vector<std::uint8_t>(texture_data.begin(), texture_data.end()));
+                    has_textures = !texture_names.empty();
+                    std::println("Loaded model textures from archive: {} ({} textures)", texture_entry->m_name_cp932,
+                                 texture_names.size());
+                }
+                catch (const std::exception& exception)
+                {
+                    std::println(std::cerr, "Archive texture load failed ({}): {}", texture_entry->m_name_cp932,
+                                 exception.what());
+                }
+            }
+            else
+            {
+                std::println(std::cerr, "Archive texture is outside GAME.DAT: {}", texture_entry->m_name_cp932);
+            }
+        }
+        else
+        {
+            std::println(std::cerr, "No matching .pix texture found beside archive model: {}",
+                         model_entry.m_name_cp932);
+        }
+
+        loaded_motion = {};
+        has_loaded_motion = false;
+        motion_clip_index = 0;
+        animation_time = 0.0f;
+
+        const auto motion_entries = find_archive_motions_for(loaded_archive, model_entry.m_name_cp932);
+        for (const auto* motion_entry : motion_entries)
+        {
+            const std::uint64_t motion_offset = motion_entry->offset();
+            const std::uint64_t motion_size = motion_entry->m_byte_size;
+            if (motion_offset > game_data.size() || motion_size > game_data.size() - motion_offset)
+            {
+                std::println(std::cerr, "Archive motion is outside GAME.DAT: {}", motion_entry->m_name_cp932);
+                continue;
+            }
+
+            try
+            {
+                const std::span<const std::uint8_t> motion_data(game_data.data() + motion_offset,
+                                                                static_cast<std::size_t>(motion_size));
+                auto package = sdbz::parse_rfsm(motion_data);
+                const std::size_t package_motion_count = package.m_motions.size();
+                if (!has_loaded_motion)
+                {
+                    loaded_motion = std::move(package);
+                    has_loaded_motion = true;
+                }
+                else
+                {
+                    for (auto& clip : package.m_motions)
+                    {
+                        loaded_motion.m_motions.push_back(std::move(clip));
+                    }
+                }
+                std::println("Loaded model motions from archive: {} ({} motions)", motion_entry->m_name_cp932,
+                             package_motion_count);
+            }
+            catch (const std::exception& exception)
+            {
+                std::println(std::cerr, "Archive motion load failed ({}): {}", motion_entry->m_name_cp932,
+                             exception.what());
+            }
+        }
+
+        if (has_loaded_motion && loaded_motion.m_motions.empty())
+        {
+            has_loaded_motion = false;
+        }
+        if (!has_loaded_motion)
+        {
+            std::println("No matching .pmt motion packages found beside archive model: {}", model_entry.m_name_cp932);
+        }
+    };
+
+    // The default player is stored inside GAME.DAT. Match the full VFS path,
+    // not just the basename, so another p01a.mdl cannot be selected by mistake.
+    auto find_archive_entry_by_path = [&](std::string_view archive_path) -> const sdbz::s_archive_entry*
+    {
+        std::string target(archive_path);
+        std::replace(target.begin(), target.end(), '\\', '/');
+        target = lower_copy(std::move(target));
+        for (const auto& entry : loaded_archive.m_entries)
+        {
+            if (entry.m_is_directory)
+            {
+                continue;
+            }
+            std::string candidate = entry.m_name_cp932;
+            std::replace(candidate.begin(), candidate.end(), '\\', '/');
+            if (lower_copy(std::move(candidate)) == target)
+            {
+                return &entry;
+            }
+        }
+        return nullptr;
+    };
+
+    auto load_default_player_from_archive = [&]()
+    {
+        constexpr std::string_view k_default_player_model = "ply/p01/p01a.mdl";
+        default_player_model_loaded = false;
+        if (!has_loaded_archive || !has_game_data)
+        {
+            std::println(std::cerr, "Cannot load default player {}: INFO.DAT/GAME.DAT is unavailable",
+                         k_default_player_model);
+            return false;
+        }
+
+        const auto* player_entry = find_archive_entry_by_path(k_default_player_model);
+        if (!player_entry)
+        {
+            std::println(std::cerr, "Default player model not found in archive: {}", k_default_player_model);
+            return false;
+        }
+
+        try
+        {
+            load_archive_model(*player_entry);
+            default_player_model_loaded = true;
+            std::println("Loaded default player model for stage: {}", player_entry->m_name_cp932);
+            return true;
+        }
+        catch (const std::exception& exception)
+        {
+            std::println(std::cerr, "Default player model load failed ({}): {}", player_entry->m_name_cp932,
+                         exception.what());
+            return false;
+        }
+    };
+
+    auto rebuild_stage_collision_world = [&](const std::size_t stage_index)
+    {
+        if (stage_index >= loaded_stages.size() || stage_index >= stage_hits.size() ||
+            stage_index >= stage_hits_loaded.size() || stage_index >= stage_worlds.size())
+        {
+            return;
+        }
+        if (stage_collision_worlds.size() < loaded_stages.size())
+        {
+            stage_collision_worlds.resize(loaded_stages.size());
+        }
+        stage_collision_worlds[stage_index] = {};
+        if (!stage_hits_loaded[stage_index])
+        {
+            std::println(std::cerr, "Stage {} has no HIT resource; player spawn cannot be resolved", stage_index);
+            return;
+        }
+        stage_collision_worlds[stage_index] = sdbz::build_stage_collision_world(
+            loaded_stages[stage_index], stage_hits[stage_index], stage_worlds[stage_index]);
+        const auto& collision = stage_collision_worlds[stage_index];
+        std::println("Stage collision world {}: {} polygons, {} unresolved references, {} degenerate polygons",
+                     stage_index, collision.m_polygons.size(), collision.m_unresolved_references,
+                     collision.m_degenerate_polygons);
+    };
+
+    // A stage transition starts a fresh player session. Keep this separate
+    // from spawn resolution so a failed stage load cannot leave the previous
+    // stage's actor, input state or follow camera active.
+    auto reset_player_stage_session = [&]()
+    {
+        player_controller_active = false;
+        camera_follow_player = false;
+        player_spawn_valid = false;
+        player_actor_placed = false;
+        player_controller.m_position = {0.0f, 0.0f, 0.0f};
+        player_controller.m_velocity = {0.0f, 0.0f, 0.0f};
+        player_controller.m_fixed_time_accumulator = 0.0f;
+        player_controller.m_jump_pressed_pending = false;
+        player_controller.m_grounded = false;
+        player_controller.m_ground_polygon_index = static_cast<std::size_t>(-1);
+        player_controller.m_ground_object_name.clear();
+        player_controller.m_ground_normal = {0.0f, 1.0f, 0.0f};
+        player_controller.m_ground_height = 0.0f;
+        player_controller.m_yaw_degrees = 0.0f;
+        player_controller.m_running = false;
+        player_controller.m_landed_this_frame = false;
+        player_jump_requested = false;
+        player_land_animation_remaining = 0.0f;
+        active_player_animation_state.reset();
+        animation_time = 0.0f;
+        player_camera.m_target = {0.0f, 0.0f, 0.0f};
+        player_camera.m_framed = false;
+    };
+
+    auto place_player_on_stage = [&]()
+    {
+        reset_player_stage_session();
+        if (!has_loaded_stage || loaded_stage_index >= loaded_stages.size())
+        {
+            return false;
+        }
+        if (loaded_stage_index >= stage_collision_worlds.size())
+        {
+            rebuild_stage_collision_world(loaded_stage_index);
+        }
+        if (loaded_stage_index >= stage_collision_worlds.size())
+        {
+            std::println(std::cerr, "Player spawn unavailable: stage collision world was not built");
+            player_controller_active = false;
+            camera_follow_player = false;
+            return false;
+        }
+
+        const auto& collision_world = stage_collision_worlds[loaded_stage_index];
+        const auto& stage = loaded_stages[loaded_stage_index];
+        const sdbz::s_player_spawn_override* selected_override = nullptr;
+        for (const auto& stage_name : stage.m_names)
+        {
+            selected_override = sdbz::find_player_spawn_override(player_spawn_overrides, stage_name);
+            if (selected_override)
+            {
+                break;
+            }
+        }
+
+        std::optional<sdbz::s_player_spawn> spawn;
+        bool spawn_override_applied = false;
+        if (selected_override)
+        {
+            spawn = sdbz::resolve_player_spawn_override(
+                collision_world, *selected_override, player_controller.m_collision_foot_offset,
+                player_controller.m_max_walkable_slope_degrees, player_controller.m_collision_capsule_radius,
+                player_controller.m_collision_capsule_height);
+            if (spawn)
+            {
+                spawn_override_applied = true;
+            }
+            else
+            {
+                std::println(
+                    std::cerr,
+                    "Player spawn override '{}' is not supported by this stage HIT; using collision-derived placement",
+                    selected_override->m_stage_key);
+            }
+        }
+        if (!spawn)
+        {
+            spawn = sdbz::find_stage_player_spawn(collision_world, player_controller.m_collision_foot_offset,
+                                                  player_controller.m_max_walkable_slope_degrees,
+                                                  player_controller.m_collision_capsule_radius,
+                                                  player_controller.m_collision_capsule_height);
+        }
+        if (!spawn)
+        {
+            std::println(
+                std::cerr,
+                "Player spawn unavailable for stage {}: no walkable HIT polygon was found; refusing Y=0 fallback",
+                loaded_stages[loaded_stage_index].m_names.empty() ? std::string("<unnamed>")
+                                                                  : loaded_stages[loaded_stage_index].m_names[0]);
+            player_controller_active = false;
+            camera_follow_player = false;
+            return false;
+        }
+
+        player_controller.m_position = spawn->m_position;
+        player_controller.m_velocity = {0.0f, 0.0f, 0.0f};
+        player_controller.m_ground_normal = spawn->m_normal;
+        player_controller.m_ground_polygon_index = spawn->m_collision_polygon_index;
+        player_controller.m_ground_object_name = spawn->m_object_name;
+        player_controller.m_ground_height = spawn->m_position[1] - player_controller.m_collision_foot_offset;
+        player_controller.m_yaw_degrees =
+            spawn_override_applied && selected_override ? selected_override->m_yaw_degrees : 0.0f;
+        player_controller.m_grounded = true;
+        player_spawn_valid = true;
+        player_actor_placed = has_loaded_model && default_player_model_loaded;
+        player_camera.m_target = {player_controller.m_position[0] + player_camera.m_follow_offset[0],
+                                  player_controller.m_position[1] + player_camera.m_follow_offset[1],
+                                  player_controller.m_position[2] + player_camera.m_follow_offset[2]};
+        player_camera.m_framed = true;
+        std::println("Player spawn: HIT object='{}' node={} polygon={} position=({}, {}, {}) area={}",
+                     spawn->m_object_name, spawn->m_stage_node_index, spawn->m_collision_polygon_index,
+                     spawn->m_position[0], spawn->m_position[1], spawn->m_position[2], spawn->m_surface_area);
+        return true;
+    };
+
+    // Build transformed collision surfaces for disk-loaded stages now that all
+    // STG world matrices and companion HIT resources are available.
+    if (stage_collision_worlds.size() < loaded_stages.size())
+    {
+        stage_collision_worlds.resize(loaded_stages.size());
+    }
+    for (std::size_t stage_index = 0; stage_index < loaded_stages.size(); ++stage_index)
+    {
+        rebuild_stage_collision_world(stage_index);
+    }
+
+    // A stage supplied on the command line is already loaded at this point.
+    // Populate its player actor and place it on an authored HIT support surface.
+    if (has_loaded_stage)
+    {
+        load_default_player_from_archive();
+        place_player_on_stage();
+    }
+
     s_draw_context ctx;
     ctx.window = &window;
     ctx.camera = &camera;
+    ctx.viewer_camera = &camera;
+    ctx.player_controller = &player_controller;
+    ctx.stage_collision_world = has_loaded_stage && loaded_stage_index < stage_collision_worlds.size()
+                                    ? &stage_collision_worlds[loaded_stage_index]
+                                    : nullptr;
+    ctx.player_controller_active = player_controller_active;
+    ctx.player_actor_placed = player_actor_placed;
     ctx.model = has_loaded_model ? &loaded_model : nullptr;
     ctx.has_model = has_loaded_model;
     ctx.mesh_visible = &mesh_visible;
@@ -784,6 +1200,7 @@ int main(int argc, char** argv)
             frame_time = 0.25;
         }
 
+        player_jump_requested = false;
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
@@ -873,7 +1290,7 @@ int main(int argc, char** argv)
                         else if (event.key.key == SDLK_RETURN || event.key.key == SDLK_SPACE ||
                                  event.key.key == SDLK_RIGHT)
                         {
-                            if (count == 0 || !has_game_data)
+                            if (count == 0)
                                 break;
                             const auto& ve = ctx.vfs_entries[vfs_selected];
                             const std::size_t entry_index = ve.index;
@@ -887,6 +1304,11 @@ int main(int argc, char** argv)
                             }
                             else
                             {
+                                // Directories need only archive metadata. File contents
+                                // require GAME.DAT to have been loaded successfully.
+                                if (!has_game_data)
+                                    break;
+
                                 // Load file based on extension.
                                 const std::uint64_t offset = entry.offset();
                                 const std::uint64_t byte_size = entry.m_byte_size;
@@ -898,26 +1320,7 @@ int main(int argc, char** argv)
                                 {
                                     if (ext == ".mdl" || ext == ".MDL")
                                     {
-                                        loaded_model = sdbz::parse_fmdl(entry_data, fs::path(name).stem().string());
-                                        has_loaded_model = true;
-                                        mesh_visible.assign(loaded_model.m_meshes.size(), false);
-                                        part_groups.clear();
-                                        for (std::size_t mi = 0; mi < loaded_model.m_meshes.size(); ++mi)
-                                        {
-                                            const auto& mesh_name = loaded_model.m_meshes[mi].m_name;
-                                            const std::string label = part_base_name(mesh_name);
-                                            auto it =
-                                                std::find_if(part_groups.begin(), part_groups.end(),
-                                                             [&](const s_part_group& g) { return g.m_label == label; });
-                                            if (it == part_groups.end())
-                                            {
-                                                part_groups.push_back({label, {}, 0});
-                                                it = part_groups.end() - 1;
-                                            }
-                                            it->m_meshes.push_back(mi);
-                                        }
-                                        apply_part_visibility(part_groups, mesh_visible);
-                                        std::println("Loaded model from archive: {}", loaded_model.m_name);
+                                        load_archive_model(entry);
                                     }
                                     else if (ext == ".pix" || ext == ".PIX")
                                     {
@@ -950,10 +1353,17 @@ int main(int argc, char** argv)
                                         has_loaded_motion = true;
                                         motion_clip_index = 0;
                                         animation_time = 0.0f;
+                                        player_land_animation_remaining = 0.0f;
+                                        active_player_animation_state.reset();
                                         std::println("Loaded motions from archive: {}", loaded_motion.m_motions.size());
                                     }
                                     else if (ext == ".stg" || ext == ".STG")
                                     {
+                                        // Invalidate the old player session before touching stage
+                                        // resources. If parsing or companion loading fails, the old
+                                        // stage's actor and camera must not remain active.
+                                        reset_player_stage_session();
+                                        default_player_model_loaded = false;
                                         try
                                         {
                                             // Clear any previously loaded stage to avoid memory buildup.
@@ -993,6 +1403,8 @@ int main(int argc, char** argv)
                                             stage_meshes_by_names.shrink_to_fit();
                                             stage_hit_by_names.clear();
                                             stage_hit_by_names.shrink_to_fit();
+                                            stage_collision_worlds.clear();
+                                            stage_collision_worlds.shrink_to_fit();
                                             has_loaded_stage = false;
                                             has_stage_model = false;
                                             has_stage_hit = false;
@@ -1058,35 +1470,42 @@ int main(int argc, char** argv)
                                                 stage_models_loaded.push_back(false);
                                             }
 
-                                            // Collision (.hit).
+                                            // Collision (.hit). Keep the stage vectors aligned even
+                                            // when a companion is missing or malformed.
+                                            stage_hit_by_names.emplace_back();
+                                            stage_hits.emplace_back();
+                                            stage_hits_loaded.push_back(false);
                                             const auto* hit_entry = find_archive_entry(".hit");
                                             if (hit_entry)
                                             {
-                                                stage_hit_by_names.emplace_back();
                                                 const std::uint64_t hoffset = hit_entry->offset();
                                                 const std::uint64_t hsize = hit_entry->m_byte_size;
-                                                if (hoffset + hsize <= game_data.size())
+                                                if (hoffset <= game_data.size() && hsize <= game_data.size() - hoffset)
                                                 {
-                                                    const std::span<const std::uint8_t> hdata(
-                                                        game_data.data() + hoffset, hsize);
-                                                    stage_hits.push_back(sdbz::parse_hit(hdata));
-                                                    stage_hits_loaded.push_back(true);
-                                                    has_stage_hit = true;
-                                                    for (std::size_t oi = 0; oi < stage_hits.back().m_objects.size();
-                                                         ++oi)
+                                                    try
                                                     {
-                                                        stage_hit_by_names
-                                                            .back()[stage_hits.back().m_objects[oi].m_name] = oi;
+                                                        const std::span<const std::uint8_t> hdata(
+                                                            game_data.data() + hoffset,
+                                                            static_cast<std::size_t>(hsize));
+                                                        stage_hits.back() = sdbz::parse_hit(hdata);
+                                                        stage_hits_loaded.back() = true;
+                                                        has_stage_hit = true;
+                                                        for (std::size_t oi = 0;
+                                                             oi < stage_hits.back().m_objects.size(); ++oi)
+                                                        {
+                                                            stage_hit_by_names
+                                                                .back()[stage_hits.back().m_objects[oi].m_name] = oi;
+                                                        }
+                                                        std::println("Stage collision from archive: {} ({} objects)",
+                                                                     hit_entry->m_name_cp932,
+                                                                     stage_hits.back().m_objects.size());
                                                     }
-                                                    std::println("Stage collision from archive: {} ({} objects)",
-                                                                 hit_entry->m_name_cp932,
-                                                                 stage_hits.back().m_objects.size());
+                                                    catch (const std::exception& exception)
+                                                    {
+                                                        std::println(std::cerr, "Stage HIT parse failed ({}): {}",
+                                                                     hit_entry->m_name_cp932, exception.what());
+                                                    }
                                                 }
-                                            }
-                                            else
-                                            {
-                                                stage_hits.emplace_back();
-                                                stage_hits_loaded.push_back(false);
                                             }
 
                                             // Stage textures (.pix) - loaded lazily after GL context.
@@ -1216,7 +1635,10 @@ int main(int argc, char** argv)
 
                                             has_loaded_stage = true;
                                             loaded_stage_index = loaded_stages.size() - 1;
-                                            camera.m_framed = false; // reframe on the newly loaded stage
+                                            camera.m_framed = false; // reframe the independent world camera
+                                            rebuild_stage_collision_world(loaded_stage_index);
+                                            load_default_player_from_archive();
+                                            place_player_on_stage();
                                             std::println("Loaded stage from archive: {} ({} nodes)", name,
                                                          loaded_stages.back().m_nodes.size());
                                         }
@@ -1264,6 +1686,74 @@ int main(int argc, char** argv)
                         }
                     }
                 }
+                if (!debug_menu.open && !vfs_open && !event.key.repeat)
+                {
+                    if (event.key.key == SDLK_P)
+                    {
+                        if (!has_loaded_model)
+                        {
+                            std::println("Load a character model before enabling the player controller.");
+                        }
+                        else if (has_loaded_stage && !player_spawn_valid)
+                        {
+                            std::println(std::cerr,
+                                         "Player control unavailable: this stage has no validated HIT spawn surface.");
+                        }
+                        else if (has_loaded_stage && !default_player_model_loaded)
+                        {
+                            std::println(std::cerr,
+                                         "Player control unavailable: the default player model did not load.");
+                        }
+                        else
+                        {
+                            player_controller_active = !player_controller_active;
+                            if (player_controller_active)
+                            {
+                                if (!has_loaded_stage)
+                                {
+                                    // Model-only preview retains the old flat-ground fallback.
+                                    player_controller.m_position = {
+                                        camera.m_target[0], player_controller.m_ground_height, camera.m_target[2]};
+                                    player_controller.m_velocity = {0.0f, 0.0f, 0.0f};
+                                    player_controller.m_fixed_time_accumulator = 0.0f;
+                                    player_controller.m_jump_pressed_pending = false;
+                                    player_controller.m_grounded = true;
+                                    player_actor_placed = true;
+                                }
+                                player_camera.m_follow_offset = {0.0f, 1.35f, 0.0f};
+                                player_camera.m_target = {
+                                    player_controller.m_position[0] + player_camera.m_follow_offset[0],
+                                    player_controller.m_position[1] + player_camera.m_follow_offset[1],
+                                    player_controller.m_position[2] + player_camera.m_follow_offset[2]};
+                                player_camera.m_framed = true;
+                                camera_follow_player = true;
+                                std::println(
+                                    "Player controller enabled: WASD / left stick move, Shift / LB run, Space / A "
+                                    "jump. Mouse orbits gameplay camera; wheel changes signed orbit distance.");
+                            }
+                            else
+                            {
+                                camera_follow_player = false;
+                                std::println("Player controller disabled; world viewer camera restored.");
+                            }
+                        }
+                        break;
+                    }
+                    else if (event.key.key == SDLK_C && player_controller_active)
+                    {
+                        player_camera.m_follow_offset = {0.0f, 1.35f, 0.0f};
+                        player_camera.m_target = {player_controller.m_position[0] + player_camera.m_follow_offset[0],
+                                                  player_controller.m_position[1] + player_camera.m_follow_offset[1],
+                                                  player_controller.m_position[2] + player_camera.m_follow_offset[2]};
+                        camera_follow_player = true;
+                        player_camera.m_framed = true;
+                        break;
+                    }
+                    else if (event.key.key == SDLK_SPACE && player_controller_active)
+                    {
+                        player_jump_requested = true;
+                    }
+                }
                 if (event.key.key == SDLK_ESCAPE)
                 {
                     running = false;
@@ -1302,25 +1792,53 @@ int main(int argc, char** argv)
                         show_effect = !show_effect;
                     else if (event.key.key == SDLK_T)
                         show_templates = !show_templates;
+                    else if (event.key.key == SDLK_H)
+                        show_collision = !show_collision;
                     else if (event.key.key == SDLK_PAGEUP)
                     {
                         loaded_stage_index = (loaded_stage_index + loaded_stages.size() - 1) % loaded_stages.size();
                         std::println("Stage: {}", loaded_stages[loaded_stage_index].m_names[0]);
+                        has_stage_model =
+                            loaded_stage_index < stage_models_loaded.size() && stage_models_loaded[loaded_stage_index];
+                        has_stage_hit =
+                            loaded_stage_index < stage_hits_loaded.size() && stage_hits_loaded[loaded_stage_index];
+                        camera.m_framed = false;
+                        place_player_on_stage();
                     }
                     else if (event.key.key == SDLK_PAGEDOWN)
                     {
                         loaded_stage_index = (loaded_stage_index + 1) % loaded_stages.size();
                         std::println("Stage: {}", loaded_stages[loaded_stage_index].m_names[0]);
+                        has_stage_model =
+                            loaded_stage_index < stage_models_loaded.size() && stage_models_loaded[loaded_stage_index];
+                        has_stage_hit =
+                            loaded_stage_index < stage_hits_loaded.size() && stage_hits_loaded[loaded_stage_index];
+                        camera.m_framed = false;
+                        place_player_on_stage();
                     }
                 }
                 // Camera zoom and re-fit.
                 if (event.key.key == SDLK_EQUALS || event.key.key == SDLK_KP_PLUS)
                 {
-                    camera.m_distance = std::clamp(camera.m_distance * 0.85f, 0.05f, 1.0e6f);
+                    if (player_controller_active)
+                    {
+                        sdbz::zoom_orbit_camera(player_camera, 1.0f);
+                    }
+                    else
+                    {
+                        camera.m_distance = std::clamp(camera.m_distance * 0.85f, 0.05f, 1.0e6f);
+                    }
                 }
                 else if (event.key.key == SDLK_MINUS || event.key.key == SDLK_KP_MINUS)
                 {
-                    camera.m_distance = std::clamp(camera.m_distance / 0.85f, 0.05f, 1.0e6f);
+                    if (player_controller_active)
+                    {
+                        sdbz::zoom_orbit_camera(player_camera, -1.0f);
+                    }
+                    else
+                    {
+                        camera.m_distance = std::clamp(camera.m_distance / 0.85f, 0.05f, 1.0e6f);
+                    }
                 }
                 else if (event.key.key == SDLK_F)
                 {
@@ -1329,12 +1847,13 @@ int main(int argc, char** argv)
                     camera.m_pitch = 0.0f;
                 }
                 // Motion clip cycling.
-                if (has_loaded_motion)
+                if (has_loaded_motion && !player_controller_active)
                 {
                     if (event.key.key == SDLK_N)
                     {
                         motion_clip_index = (motion_clip_index + 1) % loaded_motion.m_motions.size();
                         animation_time = 0.0f;
+                        active_player_animation_state.reset();
                         std::println("Motion clip {}: {}", motion_clip_index,
                                      loaded_motion.m_motions[motion_clip_index].m_name);
                     }
@@ -1343,12 +1862,11 @@ int main(int argc, char** argv)
                         motion_clip_index =
                             (motion_clip_index + loaded_motion.m_motions.size() - 1) % loaded_motion.m_motions.size();
                         animation_time = 0.0f;
+                        active_player_animation_state.reset();
                         std::println("Motion clip {}: {}", motion_clip_index,
                                      loaded_motion.m_motions[motion_clip_index].m_name);
                     }
                 }
-                break;
-            case SDL_EVENT_KEY_UP:
                 break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 if (event.button.button == SDL_BUTTON_LEFT)
@@ -1388,8 +1906,15 @@ int main(int argc, char** argv)
                     // Flip a sign to invert that axis of the mouse drag.
                     constexpr float k_drag_x = -0.5f;
                     constexpr float k_drag_y = -0.5f;
-                    camera.m_yaw += dx * k_drag_x;
-                    camera.m_pitch = std::clamp(camera.m_pitch + dy * k_drag_y, -85.0f, 85.0f);
+                    if (player_controller_active)
+                    {
+                        sdbz::orbit_camera(player_camera, dx * k_drag_x, dy * k_drag_y);
+                    }
+                    else
+                    {
+                        camera.m_yaw += dx * k_drag_x;
+                        camera.m_pitch = std::clamp(camera.m_pitch + dy * k_drag_y, -85.0f, 85.0f);
+                    }
                     last_mouse_x = static_cast<int>(event.motion.x);
                     last_mouse_y = static_cast<int>(event.motion.y);
                 }
@@ -1400,19 +1925,38 @@ int main(int argc, char** argv)
                     int window_w = 0, window_h = 0;
                     window.get_size_pixels(window_w, window_h);
                     const float units_per_pixel =
-                        2.0f * camera.m_distance / static_cast<float>(window_h > 0 ? window_h : 1);
+                        player_controller_active
+                            ? std::max(std::abs(player_camera.m_orbit_distance), 0.15f) * 2.0f /
+                                  static_cast<float>(window_h > 0 ? window_h : 1)
+                            : 2.0f * camera.m_distance / static_cast<float>(window_h > 0 ? window_h : 1);
                     const float dx = (event.motion.x - last_mouse_x) * units_per_pixel;
                     const float dy = (event.motion.y - last_mouse_y) * units_per_pixel;
                     constexpr float k_deg_to_rad = 0.01745329251994329577f;
-                    const float a = -camera.m_yaw * k_deg_to_rad;
-                    const float b = -camera.m_pitch * k_deg_to_rad;
+                    const float active_yaw =
+                        player_controller_active
+                            ? player_camera.m_yaw + (player_camera.m_orbit_distance < 0.0f ? 180.0f : 0.0f)
+                            : camera.m_yaw;
+                    const float active_pitch =
+                        player_controller_active
+                            ? player_camera.m_pitch * (player_camera.m_orbit_distance < 0.0f ? -1.0f : 1.0f)
+                            : camera.m_pitch;
+                    const float a = -active_yaw * k_deg_to_rad;
+                    const float b = -active_pitch * k_deg_to_rad;
                     const float sa = std::sin(a), ca = std::cos(a);
                     const float sb = std::sin(b), cb = std::cos(b);
                     const std::array<float, 3> right{ca, 0.0f, sa};
-                    const std::array<float, 3> up{sa * sb, cb, -sb * ca};
+                    const std::array<float, 3> up{-sa * sb, cb, sb * ca};
                     for (int c = 0; c < 3; ++c)
                     {
-                        camera.m_target[c] += -right[c] * dx + up[c] * dy;
+                        const float pan_delta = -right[c] * dx + up[c] * dy;
+                        if (player_controller_active)
+                        {
+                            player_camera.m_follow_offset[static_cast<std::size_t>(c)] += pan_delta;
+                        }
+                        else
+                        {
+                            camera.m_target[static_cast<std::size_t>(c)] += pan_delta;
+                        }
                     }
                     last_mouse_x = static_cast<int>(event.motion.x);
                     last_mouse_y = static_cast<int>(event.motion.y);
@@ -1423,10 +1967,15 @@ int main(int argc, char** argv)
                 // Zoom toward the mouse cursor: keep the world point under the
                 // cursor at the same screen position as the ortho volume scales.
                 const float wheel = static_cast<float>(event.wheel.y);
+                if (player_controller_active)
+                {
+                    sdbz::zoom_orbit_camera(player_camera, wheel);
+                    break;
+                }
                 const float prev_distance = camera.m_distance;
                 camera.m_distance = std::clamp(camera.m_distance * std::pow(0.88f, wheel), 0.05f, 1.0e6f);
                 const float dd = prev_distance - camera.m_distance;
-                if (dd != 0.0f)
+                if (dd != 0.0f && !camera_follow_player)
                 {
                     int window_w = 0, window_h = 0;
                     window.get_size_pixels(window_w, window_h);
@@ -1468,10 +2017,104 @@ int main(int argc, char** argv)
                 }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+                if (player_controller_active && !debug_menu.open && !vfs_open &&
+                    event.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH)
+                {
+                    player_jump_requested = true;
+                }
+                break;
             case SDL_EVENT_GAMEPAD_BUTTON_UP:
                 break;
             default:
                 break;
+            }
+        }
+
+        // Update player movement from keyboard and the first connected gamepad.
+        if (player_controller_active)
+        {
+            sdbz::s_player_input player_input{};
+            if (!debug_menu.open && !vfs_open)
+            {
+                const bool* keyboard_state = SDL_GetKeyboardState(nullptr);
+                if (keyboard_state)
+                {
+                    player_input.m_move_x = static_cast<float>(keyboard_state[SDL_SCANCODE_D]) -
+                                            static_cast<float>(keyboard_state[SDL_SCANCODE_A]);
+                    player_input.m_move_forward = static_cast<float>(keyboard_state[SDL_SCANCODE_W]) -
+                                                  static_cast<float>(keyboard_state[SDL_SCANCODE_S]);
+                    player_input.m_run = keyboard_state[SDL_SCANCODE_LSHIFT] || keyboard_state[SDL_SCANCODE_RSHIFT];
+                }
+
+                if (gamepad)
+                {
+                    player_input.m_move_x += gamepad_axis_to_input(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX));
+                    player_input.m_move_forward -=
+                        gamepad_axis_to_input(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY));
+                    player_input.m_run =
+                        player_input.m_run || SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+
+                    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
+                    {
+                        player_camera.m_orbit_distance +=
+                            gamepad_axis_to_input(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY));
+                    }
+                    else
+                    {
+                        sdbz::orbit_camera(player_camera,
+                                           gamepad_axis_to_input(-SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX)),
+                                           gamepad_axis_to_input(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY)));
+                    }
+                }
+                player_input.m_jump_pressed = player_jump_requested;
+
+                // Interpret movement relative to the camera's ground-plane axes.
+                player_input = sdbz::make_camera_relative_player_input(
+                    player_input, player_camera.m_yaw + (player_camera.m_orbit_distance < 0.0f ? 180.0f : 0.0f));
+            }
+
+            const sdbz::s_stage_collision_world* collision_world = nullptr;
+            if (has_loaded_stage && player_spawn_valid && loaded_stage_index < stage_collision_worlds.size())
+            {
+                collision_world = &stage_collision_worlds[loaded_stage_index];
+            }
+            sdbz::update_player_controller(player_controller, player_input, static_cast<float>(frame_time),
+                                           collision_world);
+
+            // PMT clip selection is name-driven rather than index-driven. If a
+            // package has no recognisable state names, keep its current preview
+            // clip instead of guessing an animation index.
+            if (player_controller_active && has_loaded_motion && !loaded_motion.m_motions.empty())
+            {
+                if (player_controller.m_landed_this_frame)
+                {
+                    const auto land_clip =
+                        sdbz::find_player_animation_clip(loaded_motion.m_motions, sdbz::e_player_animation_state::land);
+                    if (land_clip)
+                    {
+                        player_land_animation_remaining =
+                            std::max(loaded_motion.m_motions[*land_clip].m_duration, 0.1f);
+                    }
+                }
+
+                const bool landing_override = player_land_animation_remaining > 0.0f;
+                const auto animation_state = sdbz::classify_player_animation_state(player_controller, landing_override);
+                const auto selected_clip = sdbz::find_player_animation_clip(loaded_motion.m_motions, animation_state);
+                if (selected_clip &&
+                    (active_player_animation_state != animation_state || motion_clip_index != *selected_clip))
+                {
+                    motion_clip_index = *selected_clip;
+                    animation_time = 0.0f;
+                    active_player_animation_state = animation_state;
+                }
+
+                player_land_animation_remaining =
+                    std::max(0.0f, player_land_animation_remaining - static_cast<float>(frame_time));
+            }
+
+            if (camera_follow_player)
+            {
+                sdbz::update_follow_camera(player_camera, player_controller.m_position, static_cast<float>(frame_time));
             }
         }
 
@@ -1487,8 +2130,19 @@ int main(int argc, char** argv)
         }
         ctx.animation_time = animation_time;
 
-        // Update per-frame context fields.
+        // Update per-frame context fields. VFS selections can replace any of
+        // these resources while the application is running.
         window.get_size_pixels(ctx.drawable_width, ctx.drawable_height);
+        ctx.model = has_loaded_model ? &loaded_model : nullptr;
+        ctx.has_model = has_loaded_model;
+        ctx.mesh_visible = &mesh_visible;
+        ctx.part_groups = &part_groups;
+        ctx.motion = has_loaded_motion ? &loaded_motion : nullptr;
+        ctx.has_motion = has_loaded_motion;
+        ctx.image = has_loaded_image ? &loaded_image : nullptr;
+        ctx.has_image = has_loaded_image;
+        ctx.has_textures = has_textures;
+        ctx.texture_names = &texture_names;
         ctx.stages = has_loaded_stage ? &loaded_stages : nullptr;
         ctx.has_font = has_font;
         ctx.font = has_font ? &font : nullptr;
@@ -1497,6 +2151,14 @@ int main(int argc, char** argv)
         ctx.has_stage_model = has_stage_model;
         ctx.has_stage_hit = has_stage_hit;
         ctx.motion_clip_index = motion_clip_index;
+        ctx.camera = player_controller_active ? &player_camera : &camera;
+        ctx.viewer_camera = &camera;
+        ctx.player_controller = &player_controller;
+        ctx.stage_collision_world = has_loaded_stage && loaded_stage_index < stage_collision_worlds.size()
+                                        ? &stage_collision_worlds[loaded_stage_index]
+                                        : nullptr;
+        ctx.player_controller_active = player_controller_active;
+        ctx.player_actor_placed = player_actor_placed;
         ctx.show_effect = show_effect;
         ctx.show_collision = show_collision;
         ctx.show_templates = show_templates;

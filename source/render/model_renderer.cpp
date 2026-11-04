@@ -69,6 +69,41 @@ void render_model_viewer(s_draw_context& ctx)
     // ---- Model viewer ----
     if (ctx.has_model && ctx.model && !ctx.model->m_meshes.empty())
     {
+        const auto transform_player_position = [&ctx](const std::array<float, 3>& position)
+        {
+            if (!ctx.player_actor_placed || !ctx.player_controller)
+            {
+                return position;
+            }
+
+            constexpr float k_degrees_to_radians = 0.01745329251994329577f;
+            const float yaw = ctx.player_controller->m_yaw_degrees * k_degrees_to_radians;
+            const float cosine = std::cos(yaw);
+            const float sine = std::sin(yaw);
+            return std::array<float, 3>{
+                ctx.player_controller->m_position[0] + position[0] * cosine + position[2] * sine,
+                ctx.player_controller->m_position[1] + position[1],
+                ctx.player_controller->m_position[2] - position[0] * sine + position[2] * cosine
+            };
+        };
+        const auto transform_player_normal = [&ctx](const std::array<float, 3>& normal)
+        {
+            if (!ctx.player_actor_placed || !ctx.player_controller)
+            {
+                return normal;
+            }
+
+            constexpr float k_degrees_to_radians = 0.01745329251994329577f;
+            const float yaw = ctx.player_controller->m_yaw_degrees * k_degrees_to_radians;
+            const float cosine = std::cos(yaw);
+            const float sine = std::sin(yaw);
+            return std::array<float, 3>{
+                normal[0] * cosine + normal[2] * sine,
+                normal[1],
+                -normal[0] * sine + normal[2] * cosine
+            };
+        };
+
         const std::size_t node_count = ctx.model->m_nodes.size();
         std::vector<std::array<float, 16>> local(node_count);
         for (std::size_t ni = 0; ni < node_count; ++ni)
@@ -151,8 +186,11 @@ void render_model_viewer(s_draw_context& ctx)
 
         std::vector<std::array<float, 16>> world = build_world(local_xform, ctx.model->m_nodes);
 
-        // Compute skinned bounding box for camera framing.
-        if (!ctx.camera->m_framed)
+        // Compute skinned bounds for the independent viewer camera only.
+        sdbz::s_camera* framing_camera =
+            const_cast<sdbz::s_camera*>(
+            ctx.viewer_camera ? ctx.viewer_camera : ctx.camera);
+        if (!ctx.has_stage && framing_camera && !framing_camera->m_framed)
         {
             std::array<float, 3> skinned_min{ 1e9f, 1e9f, 1e9f };
             std::array<float, 3> skinned_max{ -1e9f, -1e9f, -1e9f };
@@ -185,8 +223,8 @@ void render_model_viewer(s_draw_context& ctx)
                             const std::uint32_t idx = p.m_indices[i + k];
                             if (idx >= m.m_vertices.size()) continue;
                             const auto& v = m.m_vertices[idx];
-                            const auto sp = skin_position(v.m_position, v, m.m_rigid_node_index,
-                                inverse_bind, world, ctx.model->m_nodes);
+                            const auto sp = transform_player_position(skin_position(v.m_position,
+                                v, m.m_rigid_node_index, inverse_bind, world, ctx.model->m_nodes));
                             skinned_min[0] = std::min(skinned_min[0], sp[0]);
                             skinned_min[1] = std::min(skinned_min[1], sp[1]);
                             skinned_min[2] = std::min(skinned_min[2], sp[2]);
@@ -200,8 +238,8 @@ void render_model_viewer(s_draw_context& ctx)
             }
             if (skinned_has_data)
             {
-                const_cast<s_camera&>(*ctx.camera).m_framed = true;
-                const_cast<s_camera&>(*ctx.camera).m_target = {
+                framing_camera->m_framed = true;
+                framing_camera->m_target = {
                     (skinned_min[0] + skinned_max[0]) * 0.5f,
                     (skinned_min[1] + skinned_max[1]) * 0.5f,
                     (skinned_min[2] + skinned_max[2]) * 0.5f,
@@ -209,16 +247,16 @@ void render_model_viewer(s_draw_context& ctx)
                 const float extent = std::max({ skinned_max[0] - skinned_min[0],
                     skinned_max[1] - skinned_min[1],
                     skinned_max[2] - skinned_min[2] });
-                const_cast<s_camera&>(*ctx.camera).m_distance = std::max(extent * 0.75f, 0.1f);
+                framing_camera->m_distance = std::max(extent * 0.75f, 0.1f);
                 std::print("Skinned bbox: ({},{},{}) to ({},{},{}) extent={} distance={}s\n",
                     skinned_min[0], skinned_min[1], skinned_min[2],
                     skinned_max[0], skinned_max[1], skinned_max[2], extent,
-                    ctx.camera->m_distance);
+                    framing_camera->m_distance);
             }
         }
 
         setup_model_lighting();
-        const s_camera& camera = *ctx.camera;
+        const sdbz::s_camera& camera = *ctx.camera;
         const auto& materials = ctx.model->m_materials;
 
         // Collect primitives, classifying opaque vs transparent.
@@ -254,8 +292,8 @@ void render_model_viewer(s_draw_context& ctx)
                 {
                     if (idx >= mesh.m_vertices.size()) continue;
                     const auto& v = mesh.m_vertices[idx];
-                    const auto sp = skin_position(v.m_position, v, rigid_node,
-                        inverse_bind, world, ctx.model->m_nodes);
+                    const auto sp = transform_player_position(skin_position(v.m_position, v,
+                        rigid_node, inverse_bind, world, ctx.model->m_nodes));
                     c[0] += sp[0]; c[1] += sp[1]; c[2] += sp[2];
                     count += 1.0f;
                 }
@@ -338,9 +376,10 @@ void render_model_viewer(s_draw_context& ctx)
             {
                 if (idx >= mesh.m_vertices.size()) continue;
                 const auto& v = mesh.m_vertices[idx];
-                const auto sp = skin_position(v.m_position, v, rigid_node,
-                    inverse_bind, world, ctx.model->m_nodes);
-                c_rasterizer::normal3f(v.m_normal[0], v.m_normal[1], v.m_normal[2]);
+                const auto sp = transform_player_position(skin_position(v.m_position, v,
+                    rigid_node, inverse_bind, world, ctx.model->m_nodes));
+                const auto normal = transform_player_normal(v.m_normal);
+                c_rasterizer::normal3f(normal[0], normal[1], normal[2]);
                 if (v.m_has_colour)
                 {
                     c_rasterizer::color4f(v.m_colour[0], v.m_colour[1], v.m_colour[2], v.m_colour[3]);

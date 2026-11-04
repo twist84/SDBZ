@@ -16,6 +16,9 @@
 #include "rasterizer/math_helpers.hpp"
 #include "rasterizer/c_rasterizer.hpp"
 
+#include "gameplay/camera.hpp"
+#include "core/stage_collision.hpp"
+
 namespace
 {
     // Lighting tuned to look closer to the editor: brighter ambient, two-sided
@@ -118,8 +121,12 @@ void render_stage_viewer(s_draw_context& ctx)
                 }
             }
 
-            // Frame the camera on the visible placed geometry (once; F re-fits).
-            if (!ctx.camera->m_framed)
+            // Frame only the independent world/viewer camera. Gameplay camera
+            // follow must never be reset by stage auto-framing.
+            sdbz::s_camera* framing_camera =
+                const_cast<sdbz::s_camera*>(
+                ctx.viewer_camera ? ctx.viewer_camera : ctx.camera);
+            if (framing_camera && !framing_camera->m_framed)
             {
                 std::array<float, 3> lo{ 1e30f, 1e30f, 1e30f };
                 std::array<float, 3> hi{ -1e30f, -1e30f, -1e30f };
@@ -154,20 +161,21 @@ void render_stage_viewer(s_draw_context& ctx)
                 }
                 if (any)
                 {
-                    const_cast<s_camera&>(*ctx.camera).m_framed = true;
-                    const_cast<s_camera&>(*ctx.camera).m_target = { (lo[0] + hi[0]) * 0.5f,
+                    framing_camera->m_framed = true;
+                    framing_camera->m_target = { (lo[0] + hi[0]) * 0.5f,
                         (lo[1] + hi[1]) * 0.5f, (lo[2] + hi[2]) * 0.5f };
                     const float extent = std::max({ hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2] });
-                    const_cast<s_camera&>(*ctx.camera).m_distance = std::max(extent * 0.6f, 0.1f);
-                    const_cast<s_camera&>(*ctx.camera).m_pitch = -30.0f; // look down on the stage
-                    const_cast<s_camera&>(*ctx.camera).m_yaw = -30.0f; // angled view of the stage
+                    framing_camera->m_distance = std::max(extent * 0.6f, 0.1f);
+                    framing_camera->m_pitch = -30.0f; // look down on the stage
+                    framing_camera->m_yaw = -30.0f; // angled view of the stage
 std::println("Stage bbox: ({}, {}, {}) to ({}, {}, {}) distance={}",
-                       lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], ctx.camera->m_distance);
+                        lo[0], lo[1], lo[2], hi[0], hi[1], hi[2],
+                        framing_camera->m_distance);
                 }
             }
 
             setup_stage_lighting();
-            const s_camera& camera = *ctx.camera;
+            const sdbz::s_camera& camera = *ctx.camera;
 
             struct stage_entry
             {
@@ -284,54 +292,93 @@ std::println("Stage bbox: ({}, {}, {}) to ({}, {}, {}) distance={}",
             c_rasterizer::end();
         }
 
-        if (ctx.show_collision && ctx.has_stage_hit && ctx.stage_hits &&
-            ctx.stage_index < ctx.stage_hits->size())
+        if (ctx.show_collision && ctx.stage_collision_world)
         {
             c_rasterizer::disable(GL_LIGHTING);
             c_rasterizer::disable(GL_TEXTURE_2D);
-            c_rasterizer::color3f(0.1f, 1.0f, 0.3f);
-            const std::vector<std::vector<sdbz::mat4>>* stage_worlds = ctx.stage_worlds;
-            const std::unordered_map<std::string, std::size_t>* hit_by_names =
-                ctx.stage_hit_by_names ? &(*ctx.stage_hit_by_names)[ctx.stage_index] : nullptr;
-            for (std::size_t ni = 0; ni < stage_nodes.size(); ++ni)
+            c_rasterizer::begin(GL_LINES);
+            for (std::size_t polygon_index = 0;
+                polygon_index < ctx.stage_collision_world->m_polygons.size(); ++polygon_index)
             {
-                const auto& node = stage_nodes[ni];
-                if (node.m_kind != 3 || !group_visible(ni)) continue;
-                c_rasterizer::push_matrix();
-                gl_mult_matrix((*stage_worlds)[ctx.stage_index][ni]);
-                c_rasterizer::begin(GL_LINES);
-                for (const auto& reference : node.m_references)
+                const auto& polygon = ctx.stage_collision_world->m_polygons[polygon_index];
+                if (ctx.player_controller &&
+                    ctx.player_controller->m_ground_polygon_index == polygon_index)
                 {
-                    if (!hit_by_names) continue;
-                    auto it = hit_by_names->find(reference.m_name);
-                    if (it == hit_by_names->end()) continue;
-                    const auto& object = (*ctx.stage_hits)[ctx.stage_index].m_objects[it->second];
-                    for (std::uint32_t pi = 0; pi < object.m_polygon_count; ++pi)
-                    {
-                        const std::size_t polygon_index =
-                            static_cast<std::size_t>(object.m_first_polygon) + pi;
-                        if (polygon_index >=
-                            (*ctx.stage_hits)[ctx.stage_index].m_polygons.size()) break;
-                        const auto& polygon =
-                            (*ctx.stage_hits)[ctx.stage_index].m_polygons[polygon_index];
-                        for (std::uint32_t vi = 0; vi < polygon.m_vertex_count; ++vi)
-                        {
-                            const std::size_t a =
-                                static_cast<std::size_t>(polygon.m_first_vertex) + vi;
-                            const std::size_t b = static_cast<std::size_t>(
-                                polygon.m_first_vertex) + ((vi + 1) % polygon.m_vertex_count);
-                            if (a >= (*ctx.stage_hits)[ctx.stage_index].m_vertices.size() ||
-                                b >= (*ctx.stage_hits)[ctx.stage_index].m_vertices.size()) continue;
-                            const auto& pa = (*ctx.stage_hits)[ctx.stage_index].m_vertices[a].m_position;
-                            const auto& pb = (*ctx.stage_hits)[ctx.stage_index].m_vertices[b].m_position;
-                            c_rasterizer::vertex3f(pa[0], pa[1], pa[2]);
-                            c_rasterizer::vertex3f(pb[0], pb[1], pb[2]);
-                        }
-                    }
-                    c_rasterizer::end();
-                    c_rasterizer::pop_matrix();
+                    c_rasterizer::color3f(1.0f, 0.85f, 0.05f);
+                }
+                else if (polygon.m_normal[1] >= 0.6427876f)
+                {
+                    // Green = walkable; red = steep/wall collision.
+                    c_rasterizer::color3f(0.1f, 1.0f, 0.3f);
+                }
+                else
+                {
+                    c_rasterizer::color3f(1.0f, 0.2f, 0.15f);
+                }
+                for (std::size_t vertex_index = 0;
+                    vertex_index < polygon.m_vertices.size(); ++vertex_index)
+                {
+                    const auto& a = polygon.m_vertices[vertex_index];
+                    const auto& b = polygon.m_vertices[
+                        (vertex_index + 1) % polygon.m_vertices.size()];
+                    c_rasterizer::vertex3f(a[0], a[1], a[2]);
+                    c_rasterizer::vertex3f(b[0], b[1], b[2]);
                 }
             }
+            c_rasterizer::end();
+            c_rasterizer::enable(GL_LIGHTING);
+        }
+
+        if (ctx.show_collision && ctx.player_actor_placed && ctx.player_controller)
+        {
+            const auto& player = *ctx.player_controller;
+            const float radius = std::max(player.m_collision_capsule_radius, 0.0f);
+            const float height = std::max(player.m_collision_capsule_height, 0.0f);
+            constexpr int k_segments = 24;
+            constexpr float k_two_pi = 6.28318530717958647692f;
+            c_rasterizer::disable(GL_LIGHTING);
+            c_rasterizer::disable(GL_TEXTURE_2D);
+            c_rasterizer::color3f(1.0f, 0.75f, 0.05f);
+            c_rasterizer::begin(GL_LINE_LOOP);
+            for (int segment = 0; segment < k_segments; ++segment)
+            {
+                const float angle = k_two_pi * static_cast<float>(segment) /
+                    static_cast<float>(k_segments);
+                c_rasterizer::vertex3f(
+                    player.m_position[0] + std::cos(angle) * radius,
+                    player.m_position[1],
+                    player.m_position[2] + std::sin(angle) * radius);
+            }
+            c_rasterizer::end();
+            c_rasterizer::begin(GL_LINE_LOOP);
+            for (int segment = 0; segment < k_segments; ++segment)
+            {
+                const float angle = k_two_pi * static_cast<float>(segment) /
+                    static_cast<float>(k_segments);
+                c_rasterizer::vertex3f(
+                    player.m_position[0] + std::cos(angle) * radius,
+                    player.m_position[1] + height,
+                    player.m_position[2] + std::sin(angle) * radius);
+            }
+            c_rasterizer::end();
+            c_rasterizer::begin(GL_LINES);
+            for (int segment = 0; segment < 4; ++segment)
+            {
+                const float angle = k_two_pi * static_cast<float>(segment) / 4.0f;
+                const float x = std::cos(angle) * radius;
+                const float z = std::sin(angle) * radius;
+                c_rasterizer::vertex3f(player.m_position[0] + x,
+                    player.m_position[1], player.m_position[2] + z);
+                c_rasterizer::vertex3f(player.m_position[0] + x,
+                    player.m_position[1] + height, player.m_position[2] + z);
+            }
+            c_rasterizer::vertex3f(player.m_position[0], player.m_position[1],
+                player.m_position[2]);
+            c_rasterizer::vertex3f(
+                player.m_position[0] + player.m_ground_normal[0] * 0.75f,
+                player.m_position[1] + player.m_ground_normal[1] * 0.75f,
+                player.m_position[2] + player.m_ground_normal[2] * 0.75f);
+            c_rasterizer::end();
             c_rasterizer::enable(GL_LIGHTING);
         }
     }

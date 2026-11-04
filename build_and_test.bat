@@ -1,42 +1,46 @@
 @echo off
-REM Simple build and test script for Super Dragon Ball Z
-REM Builds project with C++23 standard and runs tests
+setlocal
+REM Build the native runtime, tools and gameplay tests, then run every test target.
 
 set "SCRIPT_DIR=%~dp0"
+set "BUILD_DIR=%SCRIPT_DIR%build"
 cd /d "%SCRIPT_DIR%"
 
-REM Create build directory if it doesn't exist
-if not exist "build" mkdir build
-pushd build
+cmake -S "%SCRIPT_DIR%" -B "%BUILD_DIR%" -DSDBZ_BUILD_TESTS=ON
+if errorlevel 1 goto :build_failed
 
-REM Configure CMake with C++23 standard
-cmake .. -DCMAKE_BUILD_TYPE=Release -DSDBZ_BUILD_TESTS=ON
+cmake --build "%BUILD_DIR%" --config Release
+if errorlevel 1 goto :build_failed
 
-REM Build the project
-cmake --build . --target sdbz_tests
+ctest --test-dir "%BUILD_DIR%" -C Release --output-on-failure
+if errorlevel 1 goto :test_failed
 
-popd
+set "CORE_TEST=%BUILD_DIR%\Release\sdbz_tests.exe"
+if not exist "%CORE_TEST%" set "CORE_TEST=%BUILD_DIR%\Debug\sdbz_tests.exe"
+if not exist "%CORE_TEST%" set "CORE_TEST=%BUILD_DIR%\sdbz_tests.exe"
+if not exist "%CORE_TEST%" goto :test_failed
 
-if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo Build failed! Error code: %ERRORLEVEL%
-    pause
-    exit /b 1
+if exist "%SCRIPT_DIR%assets\extracted\eff\e00\e00003.ebz" (
+    "%CORE_TEST%"
+    if errorlevel 1 goto :test_failed
+) else (
+    echo Skipping asset-backed sdbz_tests: extracted game assets are not present.
 )
 
 echo.
+echo Runtime build and all native tests passed.
+echo.
+pause
+exit /b 0
 
-echo Build completed successfully!
-echo Running tests...
+:build_failed
+echo.
+echo Build failed.
+pause
+exit /b 1
 
-REM Check if tests executable exists in Debug directory
-if exist "build\Debug\sdbz_tests.exe" (
-    echo Found sdbz_tests.exe in Debug directory, running tests...
-    pushd build\Debug
-    sdbz_tests.exe
-    popd
-) else (
-    echo Error: sdbz_tests.exe not found!
-    pause
-    exit /b 1
-)
+:test_failed
+echo.
+echo Tests failed.
+pause
+exit /b 1
