@@ -1818,6 +1818,13 @@ int main(int argc, char** argv)
                     {
                         player_jump_requested = true;
                     }
+                    else if (event.key.key == SDLK_R && player_controller_active)
+                    {
+                        // Unstuck: teleport back to a valid stage spawn so the
+                        // player can recover from being embedded in collision.
+                        place_player_on_stage();
+                        std::println("Player unstuck: respawned at stage spawn");
+                    }
                 }
                 if (event.key.key == SDLK_ESCAPE)
                 {
@@ -2161,6 +2168,60 @@ int main(int argc, char** argv)
                 {
                     player_jump_requested = true;
                 }
+                else if (event.gbutton.button == SDL_GAMEPAD_BUTTON_WEST)
+                {
+                    // Gamepad equivalent of P: toggle the player controller.
+                    if (player_controller_active)
+                    {
+                        player_controller_active = false;
+                        camera_follow_player = false;
+                        std::println("Player controller disabled; world viewer camera restored.");
+                    }
+                    else if (!has_loaded_model)
+                    {
+                        std::println("Load a character model before enabling the player controller.");
+                    }
+                    else if (has_loaded_stage && !player_spawn_valid)
+                    {
+                        std::println(std::cerr,
+                                     "Player control unavailable: this stage has no validated HIT spawn surface.");
+                    }
+                    else if (has_loaded_stage && !default_player_model_loaded)
+                    {
+                        std::println(std::cerr,
+                                     "Player control unavailable: the default player model did not load.");
+                    }
+                    else
+                    {
+                        player_controller_active = true;
+                        if (!has_loaded_stage)
+                        {
+                            player_controller.m_position = {
+                                camera.m_target[0], player_controller.m_ground_height, camera.m_target[2]};
+                            player_controller.m_velocity = {0.0f, 0.0f, 0.0f};
+                            player_controller.m_fixed_time_accumulator = 0.0f;
+                            player_controller.m_jump_pressed_pending = false;
+                            player_controller.m_grounded = true;
+                            player_actor_placed = true;
+                        }
+                        player_camera.m_follow_offset = {0.0f, 1.35f, 0.0f};
+                        player_camera.m_target = {
+                            player_controller.m_position[0] + player_camera.m_follow_offset[0],
+                            player_controller.m_position[1] + player_camera.m_follow_offset[1],
+                            player_controller.m_position[2] + player_camera.m_follow_offset[2]};
+                        player_camera.m_framed = true;
+                        camera_follow_player = true;
+                        std::println(
+                            "Player controller enabled: WASD / left stick move, Shift / LB run, Space / A "
+                            "jump. Mouse orbits gameplay camera; wheel changes signed orbit distance.");
+                    }
+                }
+                else if (player_controller_active && event.gbutton.button == SDL_GAMEPAD_BUTTON_NORTH)
+                {
+                    // Gamepad equivalent of R: unstuck / respawn at stage spawn.
+                    place_player_on_stage();
+                    std::println("Player unstuck: respawned at stage spawn");
+                }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_UP:
                 if (gamepad && event.gbutton.which == SDL_GetGamepadID(gamepad))
@@ -2210,10 +2271,13 @@ int main(int argc, char** argv)
 
                     if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
                     {
+                        // Left bumper held increases the distance-change speed.
+                        const float speed_multiplier =
+                            SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) ? 12.0f : 4.0f;
                         player_camera.m_orbit_distance = std::clamp(
                             player_camera.m_orbit_distance +
                                 gamepad_axis_to_input(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY)) *
-                                    static_cast<float>(frame_time) * 4.0f,
+                                    static_cast<float>(frame_time) * speed_multiplier,
                             -1000000.0f, 1000000.0f);
                     }
                     else
