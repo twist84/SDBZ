@@ -1,8 +1,9 @@
-/build/
+/.kilo/
+/build*/
 /out/
 /assets/extracted/
 /assets/original/
+/tests/data/
 /assets/overrides/
 *.user
 *.suo
-/build-game/

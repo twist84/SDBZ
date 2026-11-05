@@ -28,6 +28,7 @@ add_library(sdbz_core STATIC
     source/core/animation.cpp
     source/core/stage.cpp
     source/core/stage_collision.cpp
+    source/core/original_spawn.cpp
     source/core/ebz.cpp
     source/core/ase.cpp
     source/core/ams.cpp
@@ -82,6 +83,12 @@ if(SDBZ_BUILD_TESTS)
     )
     target_link_libraries(sdbz_player_spawn_tests PRIVATE sdbz_core)
     add_test(NAME player_spawn COMMAND sdbz_player_spawn_tests)
+
+    add_executable(sdbz_original_spawn_tests
+        tests/test_original_spawn.cpp
+    )
+    target_link_libraries(sdbz_original_spawn_tests PRIVATE sdbz_core)
+    add_test(NAME original_spawn COMMAND sdbz_original_spawn_tests)
 
     add_executable(sdbz_player_animation_tests
         tests/test_player_animation.cpp
